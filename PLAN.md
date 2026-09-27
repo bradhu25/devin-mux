@@ -2,6 +2,57 @@
 
 Workflow plan for building and shipping the worktree-session Devin orchestrator.
 
+## Before / After — what exists today vs. what we're building
+
+### Today (no orchestrator)
+
+Running multiple Devin CLI sessions in parallel is possible but entirely
+manual, and each pain point compounds with session count:
+
+- **Manual isolation.** All sessions launched in the same checkout share files
+  and a git branch — parallel agents stomp each other. Users must know to run
+  `git worktree add` themselves, invent a directory layout, and clean up
+  worktrees/branches by hand afterwards.
+- **Manual process management.** Each session is a `devin` process in its own
+  terminal tab/pane the user creates and arranges themselves (raw tmux, or a
+  pile of terminal windows). Nothing groups sessions by task or repo set.
+- **No cross-session visibility.** No way to see at a glance which sessions
+  are working, idle, or blocked waiting on a permission prompt. Users
+  alt-tab through terminals polling for the one that needs attention.
+- **Jumping is manual.** Finding "the session doing the auth refactor" means
+  remembering which tab it's in. Resume (`devin -c`) is per-directory, so it
+  works only if you remember which directory maps to which task.
+- **Multi-repo tasks are awkward.** A task spanning repos requires manually
+  creating a worktree per repo, then launching with `--add-dir` for each.
+- **Prior art doesn't cover Devin.** Claude Squad / Conductor / Crystal /
+  Vibe Kanban solve this for Claude Code, mostly single-repo; nothing targets
+  Devin CLI.
+
+### After (devin-fun v0.1)
+
+One tool owns the worktree-session lifecycle end to end:
+
+- **One-command workspaces.** `dfun worktree new feature-x --repo api --repo web`
+  creates a named worktree set (git worktrees for up to N repos under a
+  managed root) — isolation by default, cleanup with `dfun worktree rm`.
+- **One-command sessions.** `dfun spawn feature-x -t "fix auth"` launches a
+  Devin session in tmux, scoped to that worktree, multi-repo dirs wired up
+  via `--add-dir` automatically.
+- **Live status board.** `dfun ls` (and later `dfun ui`) shows every
+  worktree → session with hook-driven status: working / idle /
+  awaiting-approval. The "which session needs me?" question has an answer.
+- **Instant jumping.** `dfun jump` opens a picker across all live sessions
+  and switches the tmux client straight to the chosen one.
+- **Everything concurrent.** All sessions keep running while you're elsewhere;
+  worktree isolation makes parallelism safe rather than risky.
+
+### Phase 2+ upside (beyond v0.1)
+
+- ACP-based dashboard: unified inbox of permission prompts across sessions,
+  custom multi-session UI not bound to tmux.
+- Mixed local/cloud board via `devin --cloud` and `/handoff` — scale-out
+  story none of the Claude-Code-era tools have.
+
 ## Phase 0 — Scaffold & spike (validate riskiest assumptions first)
 
 - [ ] Scaffold TS project (`npm init`, tsconfig, eslint, vitest, `bin` entry)
