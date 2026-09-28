@@ -107,7 +107,13 @@ sessions simultaneously:
   (`createdBranch`) may be deleted, only via `git branch -d`, NEVER `-D`.
   Locked worktrees never removed. git runs with `GIT_TERMINAL_PROMPT=0` +
   context timeout.
-- Phase 2 (later): ACP-based multi-session dashboard (own UI, unified
+- **`dmux ui` is presentation only**: Bubble Tea over the same `core`
+  services the CLI uses; `core.Snapshot()` is the single view model for
+  both `ls` and `ui` (they cannot disagree). Updates via fsnotify on the
+  events dir + periodic liveness tick. Runs in its own tmux window; jump =
+  switch-client, dashboard stays alive; `dmux init` installs a return
+  binding. UI adds glyphs/colors, never new status semantics.
+- Phase 3 (later): ACP-based multi-session dashboard (own UI, unified
   permission inbox), replacing/augmenting tmux.
 
 ## Prior art / positioning

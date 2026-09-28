@@ -505,8 +505,47 @@ Cross-cutting:
 
 ## Phase 2 — Polish & ship v0.1
 
-- [ ] `dmux ui` — full-screen Bubble Tea TUI: tree of workspaces/sessions,
-      status badges, one-key jump
+### `dmux ui` is a presentation layer, not a second implementation
+
+By Phase 2 the architecture already supports everything the TUI needs. The
+TUI calls the same `core` services as the CLI commands — it never reads raw
+hook payloads, invokes git, or knows tmux topology.
+
+```
+                 ┌──────────────┐
+  dmux ls ──────▶│              │◀────── dmux ui (Bubble Tea)
+  dmux jump ────▶│  core.App    │
+  dmux spawn ───▶│  (services)  │   Snapshot()  → []WorkspaceView{Sessions []SessionView}
+  dmux kill ────▶│              │   Jump/Spawn/Kill/Resume(...) — identical calls
+                 └──────┬───────┘
+                        │ ports
+             git · tmux · devin · state · events
+```
+
+- **One view model.** `core.Snapshot()` returns the reconciled
+  workspace→session tree with derived lifecycle/activity. `dmux ls` renders
+  it as a table; `dmux ui` renders it as a tree. They cannot disagree.
+- **Bubble Tea mapping.** `Init`: load `Snapshot()`. `Update` receives:
+  `tickMsg` (periodic reconcile, e.g. 2s — liveness check is cheap tmux
+  queries), `eventsChangedMsg` (fsnotify on `~/.devin-mux/events/`, so
+  status changes appear immediately without polling), key messages.
+  Actions (jump/spawn/kill/resume) dispatch as `tea.Cmd`s calling the same
+  `core` methods the CLI uses. `View` = pure render of the model.
+- **Jumping from inside the UI.** Recommended usage: `dmux ui` runs in its
+  own tmux window (`dmux-dashboard`); Enter on a session → `switch-client`
+  to it, the dashboard keeps running; a global tmux binding (installed by
+  `dmux init`, e.g. `prefix + D`) returns to the dashboard. Outside tmux,
+  Enter → `syscall.Exec` attach (UI exits; that's expected).
+- **Status badges** are derived from the lifecycle × activity matrix defined
+  in Phase 1 — the TUI adds glyphs/colors, never new semantics. Unified
+  "needs attention" view = filter on `awaiting-approval` (and later, ACP
+  permission inbox in Phase 3 without UI changes).
+- Mockup: conceptual only (not yet in repo — add `docs/mockup-ui.png` if
+  wanted).
+
+- [ ] `dmux ui` — full-screen Bubble Tea TUI over `core.Snapshot()`: tree
+      of workspaces/sessions, status badges, one-key jump, fsnotify-driven
+      updates, dashboard tmux window + return binding
 - [ ] Docs: README with demo GIF, install (Homebrew tap + `go install` +
       release binaries), quickstart
 - [ ] Tests: `go test` unit (state, git worktree ops, tmux adapter with fake
