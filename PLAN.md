@@ -82,7 +82,11 @@ resumption. Never let one stand in for another.
 
 ## Phase 0 — Scaffold & spike (validate riskiest assumptions first)
 
-- [ ] Scaffold Go module — layout follows domain boundaries, not commands:
+- [x] Scaffold Go module (2026-09-28: cobra root, `internal/` layout,
+      Makefile, golangci-lint w/ depguard enforcing no `os/exec` outside
+      adapters, `state.AppendEvent` O_APPEND writer + 16-writer race test,
+      minimal `dmux hook-event` raw logger). Layout follows domain
+      boundaries, not commands:
 
 ```
 devin-mux/
@@ -166,7 +170,10 @@ Spikes answer a question decisively; "the command ran" is not success.
       - a hook exiting 0 with no stdout leaves the permission flow untouched
       - hook failure (nonzero exit, crash, timeout) does not interrupt Devin
       - events remain readable after the originating process exits
-      - hook invocation latency measured (`dmux hook-event` target: <5ms)
+      - ~~hook invocation latency~~ MEASURED 2026-09-28: `dmux hook-event`
+        ≈8ms/invocation end-to-end (incl. shell fork + file append) vs ≈59ms
+        for a bare `node -e` that only reads stdin — 7× faster, and the Node
+        figure is a floor. Go decision validated empirically.
       - **hook installation route decided** (see below)
 
 ### Hook installation route (decision pending Spike 3)

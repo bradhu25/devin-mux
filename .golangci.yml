@@ -1,0 +1,32 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - misspell
+    - gocritic
+    - errorlint
+    - bodyclose
+    - noctx
+    - depguard
+  settings:
+    depguard:
+      rules:
+        # core must never talk to external tools directly; only adapters may.
+        core-no-exec:
+          files:
+            - "**/internal/core/**"
+          deny:
+            - pkg: os/exec
+              desc: "core depends on ports; only internal/adapters may use os/exec"
+        cli-no-exec:
+          files:
+            - "**/internal/cli/**"
+          deny:
+            - pkg: os/exec
+              desc: "cli is thin; only internal/adapters may use os/exec"
