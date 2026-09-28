@@ -33,14 +33,14 @@ manual, and each pain point compounds with session count:
 
 One tool owns the worktree-session lifecycle end to end:
 
-- **One-command workspaces.** `dmux worktree new feature-x --repo api --repo web`
-  creates a named worktree set (git worktrees for up to N repos under a
-  managed root) — isolation by default, cleanup with `dmux worktree rm`.
+- **One-command workspaces.** `dmux workspace new feature-x --repo api --repo web`
+  creates a named workspace (git worktrees for up to N repos under a
+  managed root) — isolation by default, cleanup with `dmux workspace rm`.
 - **One-command sessions.** `dmux spawn feature-x -t "fix auth"` launches a
   Devin session in tmux, scoped to that workspace, with all repo worktrees
   in scope automatically.
 - **Live status board.** `dmux ls` (and later `dmux ui`) shows every
-  worktree → session with hook-driven status: working / idle /
+  workspace → session with hook-driven status: working / idle /
   awaiting-approval. The "which session needs me?" question has an answer.
 - **Instant jumping.** `dmux jump` opens a picker across all live sessions
   and switches the tmux client straight to the chosen one.
@@ -91,6 +91,7 @@ devin-mux/
       against the real tool in isolation (temp repos, isolated tmux socket);
       smoke-test with real Devin only opt-in (`make smoke`) — **never launch
       paid agent sessions in routine tests**.
+
 Spikes answer a question decisively; "the command ran" is not success.
 
 - [ ] **Spike 1 — Worktree + session lifecycle.** *Can we reliably start,
@@ -154,6 +155,7 @@ Three documented ways to register hooks; they are NOT interchangeable:
 
 Spike 3 must confirm the user-level route fires identically to the
 project-level one already verified.
+
 - [x] Spike 4 (critical): **specific-conversation resumption.** VERIFIED
       2026-09-27 on Devin CLI 3000.11.3 (non-interactive `-p` mode; re-check
       interactive in Spike 1):
