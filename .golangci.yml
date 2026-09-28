@@ -23,7 +23,8 @@ linters:
         - fmt.Fprintln
     depguard:
       rules:
-        # core must never talk to external tools directly; only adapters may.
+        # core must never talk to external tools directly; only adapters
+        # (and the launcher, which exists to spawn the child) may.
         core-no-exec:
           files:
             - "**/internal/core/**"
