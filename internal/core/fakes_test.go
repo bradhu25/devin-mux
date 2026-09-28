@@ -15,14 +15,19 @@ type fakeGit struct {
 	mu       sync.Mutex
 	repos    map[string]map[string]bool // toplevel -> branches
 	worktree map[string]string          // worktree path -> repo
+	checked  map[string]string          // worktree path -> branch checked out there
 	calls    []string
 	failOn   map[string]error // "op:arg" -> error
 }
 
+// newFakeGit creates repos whose main checkout has "main" checked out, as
+// real git does.
 func newFakeGit(repos ...string) *fakeGit {
-	f := &fakeGit{repos: map[string]map[string]bool{}, worktree: map[string]string{}, failOn: map[string]error{}}
+	f := &fakeGit{repos: map[string]map[string]bool{}, worktree: map[string]string{}, checked: map[string]string{}, failOn: map[string]error{}}
 	for _, r := range repos {
 		f.repos[r] = map[string]bool{"main": true}
+		f.worktree[r] = r
+		f.checked[r] = "main"
 	}
 	return f
 }
@@ -83,7 +88,17 @@ func (f *fakeGit) WorktreeAdd(_ context.Context, repo, path string, opts Worktre
 	} else if !f.repos[repo][opts.ExistingBranch] {
 		return errors.New("no such branch")
 	}
+	branch := opts.NewBranch
+	if branch == "" {
+		branch = opts.ExistingBranch
+	}
+	for p, b := range f.checked {
+		if f.worktree[p] == repo && b == branch {
+			return fmt.Errorf("fatal: '%s' is already checked out at '%s'", branch, p)
+		}
+	}
 	f.worktree[path] = repo
+	f.checked[path] = branch
 	return os.MkdirAll(path, 0o755) // mimic git creating the directory
 }
 
@@ -92,6 +107,7 @@ func (f *fakeGit) WorktreeRemove(_ context.Context, _ string, path string, _ boo
 		return err
 	}
 	delete(f.worktree, path)
+	delete(f.checked, path)
 	return os.RemoveAll(path)
 }
 
@@ -102,7 +118,7 @@ func (f *fakeGit) WorktreeList(_ context.Context, repo string) ([]Worktree, erro
 	var out []Worktree
 	for p, r := range f.worktree {
 		if r == repo {
-			out = append(out, Worktree{Path: p})
+			out = append(out, Worktree{Path: p, Branch: f.checked[p]})
 		}
 	}
 	return out, nil

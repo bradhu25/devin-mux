@@ -87,6 +87,7 @@ func TestCreate_ValidationFailsBeforeAnySideEffect(t *testing.T) {
 		{"missing branch", CreateWorkspaceInput{Name: "x", Repos: []RepoSpec{{Path: "/src/api", Branch: "ghost"}}}, "does not exist"},
 		{"duplicate repo names", CreateWorkspaceInput{Name: "x", Repos: []RepoSpec{{Path: "/src/api"}, {Path: "/other/api"}}}, "both be named"},
 		{"branch already exists", CreateWorkspaceInput{Name: "taken", Repos: []RepoSpec{{Path: "/src/api"}}}, "already exists"},
+		{"branch checked out elsewhere", CreateWorkspaceInput{Name: "x", Repos: []RepoSpec{{Path: "/src/api", Branch: "main"}}}, "already checked out at /src/api"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

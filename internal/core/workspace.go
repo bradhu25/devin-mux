@@ -120,6 +120,17 @@ func (m *WorkspaceManager) Create(ctx context.Context, in CreateWorkspaceInput) 
 			if !exists {
 				return nil, fmt.Errorf("branch %q does not exist in %s", spec.Branch, top)
 			}
+			// git refuses to check out a branch that another worktree (including
+			// the main checkout) already has; fail here, before side effects.
+			wts, err := m.Git.WorktreeList(ctx, top)
+			if err != nil {
+				return nil, err
+			}
+			for _, wt := range wts {
+				if wt.Branch == spec.Branch {
+					return nil, fmt.Errorf("branch %q is already checked out at %s; omit @%s to create a new dmux branch from it instead", spec.Branch, wt.Path, spec.Branch)
+				}
+			}
 			repo.Branch, repo.CreatedBranch = spec.Branch, false
 			repo.BaseRef = spec.Branch
 			opts = WorktreeAddOpts{ExistingBranch: spec.Branch}
