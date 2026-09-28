@@ -67,21 +67,65 @@ One tool owns the worktree-session lifecycle end to end:
 
 ## Phase 1 — Core CLI (MVP)
 
-Data model (persisted as JSON under `~/.devin-mux/`):
-- `Worktree { name, repos: [{ path, branch, worktreePath }], createdAt }`
-- `Session { id, worktree, task, tmuxTarget, devinSessionId?, status, createdAt }`
+Data model (persisted as JSON under `~/.devin-mux/`). Design principles:
+**stable logical IDs** distinct from display names (renames don't cascade;
+tmux referenced by stable window ID, not window name), physical paths recorded
+explicitly, and **lifecycle (process) separated from activity (agent state)**
+— a session can be alive-but-idle, alive-but-blocked-on-approval, or dead
+with a resumable `devinSessionId`. Keeping these orthogonal is what makes
+recovery/resumption tractable.
+
+```ts
+type Workspace = {
+  id: string;            // stable, e.g. ws_a91c
+  name: string;          // display name, freely renamable
+  repos: WorkspaceRepo[];
+  status: "creating" | "ready" | "deleting";
+  createdAt: string;
+};
+
+type WorkspaceRepo = {
+  repoId: string;
+  sourcePath: string;    // original checkout (worktree ops run against it)
+  worktreePath: string;  // physical path under the managed root
+  branch: string;
+  baseRef: string;       // for future merge-back/PR helpers
+};
+
+type Session = {
+  id: string;
+  workspaceId: string;   // stable reference, not the name
+  task: string;
+  tmux: { sessionName: string; windowId: string }; // windowId is the stable @N id
+  devinSessionId?: string;  // enables `devin -r` resumption after exit
+  lifecycle: "starting" | "running" | "exited" | "failed";
+  activity: "working" | "idle" | "awaiting-approval" | "unknown";
+  createdAt: string;
+  lastEventAt?: string;
+};
+```
+
+Lifecycle × activity display matrix: starting/unknown = initializing;
+running/working = executing; running/idle = waiting for task;
+running/awaiting-approval = user action required; exited|failed/unknown =
+process gone (resumable if `devinSessionId` recorded). Collapse for display,
+never in storage.
 
 Commands:
-- [ ] `dmux worktree new <name> --repo <path>[@branch] ...` — create worktree set
-- [ ] `dmux worktree list / rm` — list, clean up (git worktree remove + prune)
-- [ ] `dmux spawn <worktree> [-t "task prompt"]` — new Devin session in tmux
-- [ ] `dmux jump` — interactive picker (worktree → session) that switches
+- [ ] `dmux workspace new <name> --repo <path>[@branch] ...` — create workspace
+      (git worktree per repo under the managed root)
+- [ ] `dmux workspace list / rm / rename` — list, clean up (git worktree
+      remove + prune), rename (display name only; ID stable)
+- [ ] `dmux spawn <workspace> [-t "task prompt"]` — new Devin session in tmux
+- [ ] `dmux jump` — interactive picker (workspace → session) that switches
       tmux client to the chosen session; show status badges
-- [ ] `dmux ls` — table of all worktrees/sessions with live status
+- [ ] `dmux ls` — table of all workspaces/sessions with lifecycle + activity
 - [ ] `dmux kill <session>` — end a session (tmux + record)
+- [ ] `dmux resume <session>` — relaunch an exited session via `devin -r
+      <devinSessionId>` in its workspace
 
 Cross-cutting:
-- [ ] tmux adapter (session-per-worktree, window-per-Devin-session naming
+- [ ] tmux adapter (session-per-workspace, window-per-Devin-session naming
       scheme, attach/switch logic for inside vs outside tmux)
 - [ ] Status via hooks plugin (working / idle / awaiting-approval)
 - [ ] Graceful degradation when tmux/devin missing; doctor command

@@ -5,12 +5,12 @@
 A worktree-session organizational framework for running multiple Devin CLI
 sessions simultaneously:
 
-- **Worktree** = a named workspace unit containing git worktrees of 1..N repos
-  (user picks the repo set). Lives under a managed root dir, e.g.
-  `~/.devin-mux/worktrees/<name>/<repo>/`.
+- **Workspace** (entity name; "worktree" reserved for the git primitive) = a
+  named unit containing git worktrees of 1..N repos (user picks the repo set).
+  Lives under a managed root dir, e.g. `~/.devin-mux/workspaces/<id>/<repo>/`.
 - **Session** = one Devin CLI session scoped to a task, launched inside a
-  worktree. A worktree can host multiple sessions. Multi-repo worktrees launch
-  Devin with all repo dirs as workspace dirs (`--add-dir` / `/add-dir`).
+  workspace. A workspace can host multiple sessions. Multi-repo workspaces
+  launch Devin with all repo dirs as workspace dirs (`--add-dir` / `/add-dir`).
 - Users can jump between all live sessions; all run concurrently.
 
 ## Key platform facts (verified against Devin CLI 3000.x docs)
@@ -38,6 +38,13 @@ sessions simultaneously:
   official ACP TS SDK for phase 2, npm distribution.
 - **v1 multiplexer: tmux** — each session runs interactive `devin` in a tmux
   window/pane; orchestrator provides picker to jump between them.
+- **Data model principles** (full schema in PLAN.md): stable logical IDs
+  separate from display names (workspace `id` vs `name`; tmux stable
+  `windowId` vs window name); physical paths recorded explicitly
+  (`sourcePath`/`worktreePath`/`baseRef`); session **lifecycle**
+  (starting/running/exited/failed) kept orthogonal to **activity**
+  (working/idle/awaiting-approval/unknown) — collapse only for display.
+  `devinSessionId` recorded to enable `devin -r` resumption after exit.
 - Phase 2 (later): ACP-based multi-session dashboard (own UI, unified
   permission inbox), replacing/augmenting tmux.
 
