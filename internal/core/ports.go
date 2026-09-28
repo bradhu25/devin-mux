@@ -106,6 +106,25 @@ type Tmux interface {
 	Attach(target TmuxTarget) error
 }
 
+// LaunchSpec describes a Devin invocation to build.
+type LaunchSpec struct {
+	Prompt         string // optional initial prompt, passed after `--`
+	ResumeID       string // optional Devin session id to resume (`-r`)
+	PermissionMode string // optional --permission-mode value
+	Model          string // optional --model value
+}
+
+// Devin is the port for the Devin CLI: how to invoke it and how to read
+// what it knows. The adapter isolates the version-specific CLI contract.
+type Devin interface {
+	// Available reports whether the devin binary can be found.
+	Available(ctx context.Context) error
+	// LaunchArgs returns the argv (including the binary) that starts an
+	// interactive Devin session per spec. It never includes a cwd; the
+	// caller sets that.
+	LaunchArgs(spec LaunchSpec) []string
+}
+
 // Store is the port for persisted State. Read returns an atomic snapshot
 // without locking; Update runs fn in an exclusive read-modify-write
 // transaction and persists only if fn returns nil.

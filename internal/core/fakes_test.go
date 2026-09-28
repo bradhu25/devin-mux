@@ -155,6 +155,11 @@ type fakeStore struct {
 	state State
 	// failNext, if set, makes the next Update fail once.
 	failNext error
+	// failAfter/failWith: after failAfter successful Updates, the next one
+	// fails with failWith (once). Lets tests break a saga at a chosen step.
+	failAfter int
+	failWith  error
+	updates   int
 }
 
 func (s *fakeStore) Read() (*State, error) {
@@ -174,6 +179,12 @@ func (s *fakeStore) Update(_ context.Context, fn func(*State) error) error {
 		s.failNext = nil
 		return err
 	}
+	if s.failWith != nil && s.updates == s.failAfter {
+		err := s.failWith
+		s.failWith = nil
+		return err
+	}
+	s.updates++
 	cp := s.state
 	if err := fn(&cp); err != nil {
 		return err
