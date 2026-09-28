@@ -158,25 +158,47 @@ Spikes answer a question decisively; "the command ran" is not success.
       - single-repo workspace: cwd = the repo worktree directly (no wrapper
         dir needed) — decide whether to always use the wrapper for uniformity
       - repo names / paths containing spaces handled correctly
-- [ ] **Spike 3 — Hook-driven status.** *Can hooks reliably distinguish
-      working, idle, and blocked?* Success criteria:
-      - every managed session's events carry its `DMUX_SESSION_ID`
-        (~~env inheritance~~ VERIFIED in Spike 4)
-      - start/turn-completion/exit observable (~~Stop vs SessionEnd~~
-        VERIFIED in Spike 4)
-      - `PermissionRequest` produces an observable event; test what fires
-        after **approve**, **deny**, and **cancel** — determines how
-        approval_resolved is inferred, or whether we must surface "unknown"
-      - a hook exiting 0 with no stdout leaves the permission flow untouched
-      - hook failure (nonzero exit, crash, timeout) does not interrupt Devin
-      - events remain readable after the originating process exits
+- [x] **Spike 3 — Hook-driven status.** *Can hooks reliably distinguish
+      working, idle, and blocked?* **Answer: hooks alone cannot; hooks +
+      read-only `sessions.db` can.** VERIFIED 2026-09-28, CLI 3000.11.3,
+      interactive + `-p`:
+      - every managed session's events carry its `DMUX_SESSION_ID` — PASS
+      - start/turn-completion/exit observable — PASS. Full sequence per
+        tool call: `PreToolUse` → `PermissionRequest` (if needed) →
+        `PostToolUse` (only if it ran); all three share **`tool_use_id`**.
+        `UserPromptSubmit` carries `prompt_id` (all hooks in a turn share it).
+        `SessionEnd.reason`: `prompt_input_exit` (user `/exit`) vs `other`.
+      - `PermissionRequest` observable — PASS. **Approve** → `PostToolUse`
+        (same `tool_use_id`) → `Stop`. **Deny** → NO hook fires. **Cancel**
+        (Esc) → NO hook fires. Crucially, **`Stop` does NOT fire after deny
+        or cancel** — the agent goes idle at the input box with zero hook
+        signal. Hook-only status would show a false "awaiting-approval"
+        indefinitely.
+      - resolution source found: Devin's `sessions.db` table
+        `tool_call_state(session_id, tool_call_id, tool_call_json,
+        tool_call_update_json)`. `tool_call_id` == hook `tool_use_id`.
+        `tool_call_update_json.status` is `completed` | `failed`, with
+        `_meta."cognition.ai/rejected": true` (deny) or
+        `_meta."cognition.ai/canceled": true` (cancel). **Row is written
+        within ~300ms of the user's action** (polled at 0.3s; deny at
+        17:59:30, row at 17:59:30.289). Read-only, best-effort: schema is
+        undocumented internal state.
+      - passive hook (exit 0, no stdout) leaves the permission flow
+        untouched — PASS (in `-p` mode Devin's own policy rejected the call,
+        not us; interactively the prompt appeared normally)
+      - events remain readable after process exit — PASS
       - ~~hook invocation latency~~ MEASURED 2026-09-28: `dmux hook-event`
         ≈8ms/invocation end-to-end (incl. shell fork + file append) vs ≈59ms
         for a bare `node -e` that only reads stdin — 7× faster, and the Node
         figure is a floor. Go decision validated empirically.
-      - **hook installation route decided** (see below)
+      - hook installation route — DECIDED: user-level
+        `~/.config/devin/config.json` `"hooks"` fires identically to the
+        project-level route (see below)
+      - not tested: hook failure modes (nonzero exit / timeout) not
+        interrupting Devin — docs say "logged, doesn't block"; verify
+        opportunistically in M3, low risk since we always exit 0
 
-### Hook installation route (decision pending Spike 3)
+### Hook installation route (DECIDED — Spike 3)
 
 Three documented ways to register hooks; they are NOT interchangeable:
 
@@ -186,8 +208,9 @@ Three documented ways to register hooks; they are NOT interchangeable:
 | plugin `hooks.json` | every session where plugin installed | "best effort and fail open"; local (CLI/Desktop) only. Good as an *alternative distribution* (`devin plugins install`), not the primary |
 | `.devin/hooks.v1.json` in the worktree | project-level | VERIFIED working 2026-09-27, but writes a file into the user's repo worktree — reject as primary |
 
-Spike 3 must confirm the user-level route fires identically to the
-project-level one already verified.
+Spike 3 confirmed the user-level route fires identically to the
+project-level one. Config shape (per event, all 7 events):
+`{"matcher": "", "hooks": [{"type": "command", "command": "<abs path>/dmux hook-event", "timeout": 5}]}`.
 
 - [x] Spike 4 (critical): **specific-conversation resumption.** VERIFIED
       2026-09-27 on Devin CLI 3000.11.3 (non-interactive `-p` mode; re-check
@@ -254,7 +277,7 @@ const (
     ToolStarted       EventType = "tool_started"
     ToolCompleted     EventType = "tool_completed"
     ApprovalRequested EventType = "approval_requested"
-    ApprovalResolved  EventType = "approval_resolved" // inferred, see below
+    ApprovalResolved  EventType = "approval_resolved" // reconciler-derived; Data.outcome = approved|denied|canceled|unknown
     TurnCompleted     EventType = "turn_completed"
     SessionEnded      EventType = "session_ended"
     ProcessExited     EventType = "process_exited"    // from launch wrapper
@@ -273,9 +296,21 @@ type SessionEvent struct {
 Hook → event mapping: `SessionStart`→session_started, `UserPromptSubmit`→
 prompt_submitted, `PreToolUse`→tool_started, `PostToolUse`→tool_completed,
 `PermissionRequest`→approval_requested, `Stop`→turn_completed,
-`SessionEnd`→session_ended. **There is no hook for "permission resolved"**:
-approval_resolved is inferred by the reducer from the next tool_started /
-tool_completed / turn_completed after an approval_requested.
+`SessionEnd`→session_ended. Events carry `toolUseId` and `promptId` in
+`Data` when present.
+
+**There is no hook for "permission resolved"** (Spike 3: deny and cancel
+fire nothing, not even `Stop`). approval_resolved is produced by the
+**reconciler**, not the hook writer, from two evidence sources in order:
+1. `tool_completed` with the same `toolUseId` → resolved: approved.
+2. Devin's `sessions.db` `tool_call_state` row for that `toolUseId`
+   (read-only, best-effort): `completed` → approved; `_meta.rejected` →
+   denied; `_meta.canceled` → canceled. Written within ~300ms of the user
+   action. Denied/canceled → activity **idle** (agent is at the input box).
+3. Hook-only fallback if the DB is unreadable: a later `prompt_submitted`
+   with a different `promptId` implicitly resolves the pending approval
+   (outcome unknown → idle). Otherwise remain awaiting-approval, but mark
+   evidence as stale after a threshold and display **unknown**.
 
 **Reducer (FSM)**: session_started/prompt_submitted/tool_started → running +
 working; approval_requested → awaiting-approval; turn_completed → idle;

@@ -49,6 +49,15 @@ sessions simultaneously:
 - **Verify CLI contract against the installed binary before hardcoding**
   (`devin --help`, `devin acp --help`); Devin CLI evolves fast. Useful:
   `devin list --format json` (sessions in cwd), `devin rm <id>`.
+- **Spike 3 VERIFIED (2026-09-28)**: per tool call `PreToolUse` →
+  `PermissionRequest` → `PostToolUse`, all sharing `tool_use_id`. Approve →
+  PostToolUse + Stop. **Deny/cancel → NO hook fires, not even Stop.**
+  Resolution comes from Devin's `sessions.db` `tool_call_state`
+  (`tool_call_id` == `tool_use_id`; `status` completed|failed;
+  `_meta."cognition.ai/rejected"` / `"cognition.ai/canceled"`), written
+  within ~300ms. Read-only, best-effort; fallback = next `prompt_submitted`
+  resolves implicitly, else `unknown`. Hooks alone are insufficient for
+  status — this is why the reconciler has two evidence sources.
 - **Live status principles** (full design in PLAN.md): hooks emit
   *normalized* events (JSONL, contract independent of Devin payload so a
   Phase 3 ACP adapter plugs in unchanged); reducer FSM derives state;
