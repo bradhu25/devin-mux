@@ -88,6 +88,15 @@ sessions simultaneously:
   O_APPEND + one `write()` per line. Derived lifecycle/activity are never
   persisted — recomputed from events + liveness. Workspace dirs are named at
   creation and never moved on rename (path recorded explicitly).
+- **Cleanup/failure handling** (full design in PLAN.md): workspace create/rm
+  are sagas — validate first, bracket every external side effect with a
+  state transition (`creating`/`ready`/`deleting`/`failed`), compensate in
+  reverse on failure; `dmux doctor` reconciles anything stuck mid-saga.
+  `kill` ≠ `rm`. Destructive ops need explicit flags (`--stop`, `--discard`,
+  `--delete-branches`). Branches kept by default; only dmux-created branches
+  (`createdBranch`) may be deleted, only via `git branch -d`, NEVER `-D`.
+  Locked worktrees never removed. git runs with `GIT_TERMINAL_PROMPT=0` +
+  context timeout.
 - Phase 2 (later): ACP-based multi-session dashboard (own UI, unified
   permission inbox), replacing/augmenting tmux.
 

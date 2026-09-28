@@ -277,6 +277,68 @@ tmux layout: one tmux session per workspace (`dmux-<workspaceName>`,
 session name also recorded — tmux sessions are renamable too, so record the
 tmux session ID `$N` alongside the name), one window per Devin session.
 
+### Cleanup and failure handling (design constraint)
+
+No atomic transaction spans git + filesystem + tmux + `state.json`. dmux
+must manage partial failure explicitly, as a small local **saga**: ordered
+steps with compensating actions, and state transitions that bracket every
+external side effect so a crash at any point leaves a recognizable state.
+
+**Workspace creation** (`dmux workspace new`):
+
+```
+1. Validate everything up front (repos exist & are git repos, branch names
+   legal, no name collision, target dir absent) — fail before any side effect
+2. state: reserve Workspace{status: "creating"}           ← flock'd Update()
+3. for each repo: git worktree add [-b <branch>] <path> <baseRef>
+      record WorkspaceRepo incl. createdBranch (did dmux create the branch?)
+4. state: status → "ready"
+on failure at step 3: rollback created worktrees in reverse
+   (git worktree remove; git branch -d ONLY if createdBranch — `-d` refuses
+   unmerged, and dmux NEVER uses `-D`), then state: status → "failed"
+   (kept visible for `dmux doctor`, not silently deleted)
+```
+
+**Workspace removal** (`dmux workspace rm`):
+
+```
+1. Identify sessions in the workspace. Any lifecycle=running → REFUSE unless
+   --stop given; kill ≠ rm, always
+2. state: status → "deleting"
+3. (--stop) terminate managed processes: signal wrapper, wait for
+   process_exited (bounded), verify PID gone; kill tmux windows
+4. Inspect each worktree: `git status --porcelain`, unpushed commits vs
+   baseRef, `git worktree list --porcelain` for `locked`
+     dirty/unpushed → REFUSE unless --discard; print summary, point to
+                      `dmux workspace diff <name>`
+     locked        → REFUSE always (user locked it deliberately)
+5. git worktree remove <path> (never --force unless --discard)
+6. Branch policy: KEEP by default. `--delete-branches` deletes via `-d` only,
+   only if createdBranch. Never touch pre-existing branches.
+7. git worktree prune (per source repo)
+8. state: remove Workspace + its Session records          ← last
+```
+
+Devin's own conversation history is untouched by rm (it lives in Devin's
+store); we just lose our `devinSessionId` mapping. Print the ids on rm so
+the user can still `devin -r` manually.
+
+**Crash recovery**: `dmux doctor` (and a lightweight check on every command)
+finds workspaces stuck in `creating`/`deleting`/`failed`, sessions whose
+tmux window/tag is gone, and orphaned dirs under the workspaces root, and
+offers to finish the rollback/removal or reconcile the record.
+
+Rules:
+- **`dmux kill` ends a process. `dmux workspace rm` deletes work.** Never
+  conflate; kill never removes files, rm never runs implicitly.
+- **Destructive = explicit flag + confirmation** (`--stop`, `--discard`,
+  `--delete-branches`; `--yes` to skip the prompt for scripts). Default
+  invocations are always safe.
+- **Respect git's worktree lock.** Locked worktrees are never removed.
+- **git must not hang.** Every git invocation runs with
+  `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, and a context timeout.
+- **Validate before side effects; state before and after each side effect.**
+
 ## Phase 1 — Core CLI (MVP)
 
 Data model (persisted as JSON under `~/.devin-mux/`). Design principles:
@@ -292,7 +354,7 @@ type Workspace = {
   id: string;            // stable, e.g. ws_a91c
   name: string;          // display name, freely renamable
   repos: WorkspaceRepo[];
-  status: "creating" | "ready" | "deleting";
+  status: "creating" | "ready" | "deleting" | "failed"; // saga states; doctor reconciles non-ready
   createdAt: string;
 };
 
@@ -302,6 +364,7 @@ type WorkspaceRepo = {
   worktreePath: string;  // physical path under the managed root
   branch: string;
   baseRef: string;       // for future merge-back/PR helpers
+  createdBranch: boolean; // dmux created the branch → eligible for `-d` on rollback/rm; never delete pre-existing branches
 };
 
 type Session = {
@@ -326,8 +389,13 @@ never in storage.
 Commands:
 - [ ] `dmux workspace new <name> --repo <path>[@branch] ...` — create workspace
       (git worktree per repo under the managed root)
-- [ ] `dmux workspace list / rm / rename` — list, clean up (git worktree
-      remove + prune), rename (display name only; ID stable)
+- [ ] `dmux workspace list / rm / rename` — list, clean up (saga: refuse if
+      running unless `--stop`, refuse if dirty unless `--discard`, keep
+      branches unless `--delete-branches`), rename (display name only)
+- [ ] `dmux workspace diff/status <name>` — inspect uncommitted/unpushed
+      work across all repos in a workspace before deleting it
+- [ ] `dmux doctor` — find/repair workspaces stuck mid-saga, dead tmux
+      targets, orphaned dirs
 - [ ] `dmux spawn <workspace> [-t "task prompt"]` — new Devin session in tmux
 - [ ] `dmux jump` — interactive picker (workspace → session) that switches
       tmux client to the chosen session; show status badges
@@ -346,7 +414,9 @@ Cross-cutting:
 - [ ] Status pipeline: `dmux hook-event` (hook writer) + `dmux run` (launch
       wrapper w/ process_exited) + JSONL event store + reducer + reconciler
 - [ ] Hooks plugin (`hooks.json`) shipping the `dmux hook-event` bindings
-- [ ] Graceful degradation when tmux/devin missing; doctor command
+- [ ] Graceful degradation when tmux/devin missing (doctor reports it)
+- [ ] git adapter: `GIT_TERMINAL_PROMPT=0`, context timeouts, porcelain
+      parsing (`worktree list --porcelain`, `status --porcelain`)
 
 ## Phase 2 — Polish & ship v0.1
 
