@@ -11,8 +11,12 @@ sessions simultaneously:
 - **Session** = one Devin CLI session scoped to a task, launched inside a
   workspace. A workspace can host multiple sessions. Multi-repo scope:
   **there is NO `--add-dir` CLI flag** (verified 3000.11.3; `[PATH]...`
-  opens Devin Desktop). `/add-dir` is runtime-only. Plan: launch Devin with
-  cwd = workspace root so all repo worktrees are subdirectories (Spike 2).
+  opens Devin Desktop). **Spike 2 VERIFIED (2026-09-28)**: launch Devin with
+  cwd = workspace root (plain non-git dir) with repo worktrees as subdirs —
+  edits/git work in all repos, sources untouched, per-repo rules load
+  lazily on first file access. Always use this layout (even single-repo).
+  dmux writes a workspace-root `AGENTS.md` (repos/paths/branches/task) —
+  loaded at start, no repo pollution since the root is not in any repo.
 - Users can jump between all live sessions; all run concurrently.
 
 ## Key platform facts (verified against Devin CLI 3000.x docs)

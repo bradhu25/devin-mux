@@ -164,25 +164,39 @@ Spikes answer a question decisively; "the command ran" is not success.
       - Some terminals swallow the `C-b` prefix (user hit this); `dmux jump`
         is unaffected (switches from outside) but `dmux init`'s
         return-to-dashboard binding needs a doc note / alternative.
-- [ ] **Spike 2 — Multi-repo workspace.** *Can one agent safely operate
-      across separate managed worktrees?* **Design change**: verified
-      2026-09-27 that `--add-dir` is NOT a CLI flag in 3000.11.3 (the
-      `[PATH]...` positional opens Devin Desktop). `/add-dir` exists only as
-      a runtime slash command. Primary approach to test: **launch Devin with
-      cwd = the workspace root** (`~/.devin-mux/workspaces/<name>/`) so every
-      repo worktree is a subdirectory of the single workspace dir. Fallback:
-      `tmux send-keys "/add-dir <path>" Enter` after launch (fragile; last
-      resort). Success criteria:
-      - two independent source repos → two worktrees under one workspace dir
-      - Devin's primary directory is the workspace root; `sessions.db`
-        `workspace_dirs` shows what Devin considers in-scope
-      - agent can read/edit/run git in both subrepos; edits land in the
-        managed worktrees, never the original checkouts
-      - per-repo `AGENTS.md`/`.devin/` rules in subdirs are still discovered
-        (docs: lazily, on access) — confirm
-      - single-repo workspace: cwd = the repo worktree directly (no wrapper
-        dir needed) — decide whether to always use the wrapper for uniformity
-      - repo names / paths containing spaces handled correctly
+- [x] **Spike 2 — Multi-repo workspace.** *Can one agent safely operate
+      across separate managed worktrees?* **Answer: yes, with cwd =
+      workspace root.** VERIFIED 2026-09-28, CLI 3000.11.3. Context:
+      `--add-dir` is NOT a CLI flag (the `[PATH]...` positional opens Devin
+      Desktop); `/add-dir` is runtime-only. Approach tested: launch Devin
+      with cwd = `workspaces/<name>/` (a plain, non-git directory) with each
+      repo worktree as a subdirectory.
+      - two source repos → two worktrees under one workspace dir — PASS
+      - Devin's primary dir = workspace root — PASS (`sessions.db`
+        `working_directory`; `workspace_dirs` stays `[]` — it only reflects
+        `/add-dir` additions, subdirs are implicitly in scope)
+      - read/edit/`git -C <sub>` in both repos — PASS; edits landed in
+        both worktrees (`M README.md`), **source checkouts untouched**
+        (clean status, HEADs unchanged)
+      - per-repo `.devin/rules/*.md` (always_on) in subdirs — PASS, and the
+        mechanism is now precise: **lazy discovery**. Cold start with no
+        tool use → rule NOT in context (`UNKNOWN`). After reading one file
+        in `api/` → rule IS in context (`API-CODENAME`) without being asked
+        to look for it. Matches docs ("discovered lazily when the agent
+        accesses files in that directory").
+      - not tested: paths with spaces (M1 adapter unit test), single-repo
+        layout decision (see below)
+      Design consequences:
+      - **Always use the workspace-root layout, even for one repo.** Uniform
+        cwd semantics, uniform hook `projectDir`, and it gives dmux a
+        non-git directory it owns.
+      - **dmux writes `workspaces/<name>/AGENTS.md`** (dmux-authored, in the
+        workspace root, which is NOT inside any repo → zero repo pollution)
+        describing the workspace: repos, their paths, branches, base refs,
+        and the session task. Loaded at session start, it gives the agent
+        the multi-repo map immediately and compensates for lazy per-repo
+        rule loading. Regenerated on workspace changes; never committed.
+      - `/add-dir` fallback is unnecessary; drop it.
 - [x] **Spike 3 — Hook-driven status.** *Can hooks reliably distinguish
       working, idle, and blocked?* **Answer: hooks alone cannot; hooks +
       read-only `sessions.db` can.** VERIFIED 2026-09-28, CLI 3000.11.3,
@@ -577,7 +591,8 @@ never in storage.
 
 Commands:
 - [ ] `dmux workspace new <name> --repo <path>[@branch] ...` — create workspace
-      (git worktree per repo under the managed root)
+      (git worktree per repo under the managed root) and write the
+      workspace-root `AGENTS.md` map
 - [ ] `dmux workspace list / rm / rename` — list, clean up (saga: refuse if
       running unless `--stop`, refuse if dirty unless `--discard`, keep
       branches unless `--delete-branches`), rename (display name only)
