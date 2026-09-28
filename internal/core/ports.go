@@ -51,6 +51,61 @@ type WorktreeAddOpts struct {
 	ExistingBranch string // check out this existing branch
 }
 
+// Tag names for tmux user options that give managed targets a positive
+// identity independent of renamable names and server-lifetime ids.
+const (
+	TagWorkspace = "@dmux_workspace" // on the tmux session: Workspace.ID
+	TagSession   = "@dmux_session"   // on the tmux window: Session.ID
+)
+
+// TmuxWindow is one window on the tmux server, with dmux tags resolved.
+type TmuxWindow struct {
+	SessionID   string // $N
+	SessionName string
+	WindowID    string // @N
+	WindowName  string
+	PanePID     int
+	PaneDead    bool
+	WorkspaceID string // value of TagWorkspace on the session, "" if untagged
+	DmuxSession string // value of TagSession on the window, "" if untagged
+}
+
+// SpawnWindowOpts describes a window to create for a dmux session.
+type SpawnWindowOpts struct {
+	SessionName string            // tmux session to create or reuse (dmux-<workspace>)
+	WorkspaceID string            // stamped as TagWorkspace when the session is created
+	WindowName  string            // display only
+	SessionID   string            // dmux Session.ID; stamped as TagSession on the window
+	Cwd         string            // working directory for the command
+	Env         map[string]string // environment for the command (e.g. DMUX_SESSION_ID)
+	Argv        []string          // command to run in the window
+}
+
+// Tmux is the port for the terminal multiplexer. The adapter shares the
+// user's tmux server (a separate socket would break switch-client) and only
+// ever acts on windows carrying dmux tags.
+type Tmux interface {
+	// Available reports whether tmux can be invoked.
+	Available(ctx context.Context) error
+	// SpawnWindow creates the session if missing (tagging it), adds a window
+	// running Argv with remain-on-exit set, tags the window, and returns the
+	// stable target ids.
+	SpawnWindow(ctx context.Context, opts SpawnWindowOpts) (TmuxTarget, error)
+	// ListWindows returns every window on the server with tags resolved.
+	// Callers filter to DmuxSession != "" before acting on anything.
+	ListWindows(ctx context.Context) ([]TmuxWindow, error)
+	// KillWindow kills a window by @N id.
+	KillWindow(ctx context.Context, windowID string) error
+	// InsideTmux reports whether the current process runs inside a tmux
+	// client ($TMUX set).
+	InsideTmux() bool
+	// SwitchClient moves the current client to the window (inside tmux only).
+	SwitchClient(ctx context.Context, target TmuxTarget) error
+	// Attach replaces the current process with a tmux client attached to
+	// the target (outside tmux only). On success it never returns.
+	Attach(target TmuxTarget) error
+}
+
 // Store is the port for persisted State. Read returns an atomic snapshot
 // without locking; Update runs fn in an exclusive read-modify-write
 // transaction and persists only if fn returns nil.
