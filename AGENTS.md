@@ -49,6 +49,14 @@ sessions simultaneously:
 - **Verify CLI contract against the installed binary before hardcoding**
   (`devin --help`, `devin acp --help`); Devin CLI evolves fast. Useful:
   `devin list --format json` (sessions in cwd), `devin rm <id>`.
+- **Spike 1 VERIFIED (2026-09-28)**: worktree+tmux+Devin lifecycle works
+  end to end; `devin -r <id> -- "<prompt>"` resumes AND submits a prompt
+  interactively. Gotchas: Ctrl+D/EOF on empty input exits Devin (never
+  fake-attach in tests); Devin exit closes its tmux window → last window
+  kills the tmux session → `dmux run` wrapper must hold the pane open and
+  report exit; `#{pane_pid}` is the launcher shim, real binary is its child;
+  `/exit` via send-keys is unreliable (palette) — `dmux kill` uses SIGTERM
+  to the process tree.
 - **Spike 3 VERIFIED (2026-09-28)**: per tool call `PreToolUse` →
   `PermissionRequest` → `PostToolUse`, all sharing `tool_use_id`. Approve →
   PostToolUse + Stop. **Deny/cancel → NO hook fires, not even Stop.**

@@ -124,21 +124,46 @@ devin-mux/
 
 Spikes answer a question decisively; "the command ran" is not success.
 
-- [ ] **Spike 1 — Worktree + session lifecycle.** *Can we reliably start,
+- [x] **Spike 1 — Worktree + session lifecycle.** *Can we reliably start,
       leave, return to, and resume a Devin session in a managed worktree?*
-      Success criteria:
-      - worktree created without modifying the original checkout (status,
-        branch, index untouched)
-      - Devin launches with cwd = the worktree; `DEVIN_PROJECT_DIR` in hook
-        payload confirms it
-      - detaching the tmux client does not terminate the agent
-      - reattaching returns to the same live process (same PID)
-      - after Devin exits, `devin -r <id>` restores the intended
-        conversation *in interactive mode* (re-confirm Spike 4's `-p` result)
-      - two histories in one worktree are distinguishable via `devin list
-        --format json`
-      - initial task prompt delivery: verify `devin -- "<prompt>"` starts an
-        interactive session with that prompt (docs say so; confirm)
+      **Answer: yes.** VERIFIED 2026-09-28, CLI 3000.11.3, tmux 3.7c,
+      isolated server `tmux -L dmux-spike1`:
+      - worktree created without modifying the original checkout — PASS
+        (`git worktree add -b dmux/feature-x <path> HEAD`; source status
+        clean, HEAD unchanged, still on `main`; `--porcelain` output parsed
+        as expected: `worktree`/`HEAD`/`branch` stanzas)
+      - Devin launches with cwd = the worktree — PASS (`DEVIN_PROJECT_DIR`
+        in hook payload and tmux `#{pane_current_path}` both = worktree)
+      - detaching does not terminate the agent — PASS (ran 40+ min with zero
+        clients attached; no `SessionEnd`)
+      - reattaching returns to the same live process — PASS (real terminal
+        attach, prompt answered, detach; `pane_pid` unchanged)
+      - `devin -r <id>` restores the specific conversation interactively —
+        PASS (`SessionStart.source=resume`, history replayed in pane,
+        answered from memory)
+      - initial prompt via `devin -- "<prompt>"` — PASS, and it **composes
+        with `-r`**: `devin -r <id> -- "<prompt>"` resumes and submits
+      - `@dmux_session` window tag + `$N`/`@N` ids — PASS
+      - not done: `devin list --format json` for two histories in one dir
+        (already covered by Spike 4's sessions.db check; do in M2)
+      Findings for M2 (`dmux run` wrapper / tmux adapter):
+      - **Ctrl+D on empty input exits Devin** (`SessionEnd.reason=
+        prompt_input_exit`). Attaching a tmux client with a dead stdin
+        (e.g. `script`/non-tty automation) feeds EOF and kills the session.
+        Tests must never fake-attach; only real terminals attach.
+      - **Devin exit closes its tmux window; last window → session gone;
+        last session → server gone.** The wrapper must hold the pane open
+        after exit and print exit status so the tmux target doesn't vanish
+        under the Session record (`remain-on-exit` or wrapper wait).
+      - tmux `#{pane_pid}` is the launcher shim (`~/.local/bin/devin`); the
+        versioned binary is its child. Liveness = pane process *tree*.
+      - `/exit` via `tmux send-keys` did not end the session within 3s
+        (slash palette needs selection). Programmatic graceful stop is an
+        open question for `dmux kill`; SIGTERM to the process tree is the
+        fallback, with `process_exited` from the wrapper as the signal.
+      - Some terminals swallow the `C-b` prefix (user hit this); `dmux jump`
+        is unaffected (switches from outside) but `dmux init`'s
+        return-to-dashboard binding needs a doc note / alternative.
 - [ ] **Spike 2 — Multi-repo workspace.** *Can one agent safely operate
       across separate managed worktrees?* **Design change**: verified
       2026-09-27 that `--add-dir` is NOT a CLI flag in 3000.11.3 (the
