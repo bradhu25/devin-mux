@@ -189,7 +189,9 @@ func TestStore_LockTimeout(t *testing.T) {
 	// until we say so, and shrink the deadline via context.
 	release := make(chan struct{})
 	holding := make(chan struct{})
+	holderDone := make(chan struct{})
 	go func() {
+		defer close(holderDone)
 		_ = s.Update(context.Background(), func(*core.State) error {
 			close(holding)
 			<-release
@@ -201,6 +203,7 @@ func TestStore_LockTimeout(t *testing.T) {
 	defer cancel()
 	err := s.Update(ctx, func(*core.State) error { return nil })
 	close(release)
+	<-holderDone // let the holder finish writing before TempDir cleanup
 	if !errors.Is(err, ErrLockTimeout) {
 		t.Fatalf("want ErrLockTimeout, got %v", err)
 	}

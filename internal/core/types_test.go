@@ -6,20 +6,48 @@ import (
 	"testing"
 )
 
-func TestNewIDs_FormatAndUniqueness(t *testing.T) {
-	re := regexp.MustCompile(`^(ws|s|e)_[0-9a-f]{6}$`)
-	seen := map[string]bool{}
-	for i := 0; i < 1000; i++ {
-		for _, id := range []string{NewWorkspaceID(), NewSessionID(), NewEventID()} {
-			if !re.MatchString(id) {
-				t.Fatalf("bad id format: %q", id)
+func TestNewIDs_Format(t *testing.T) {
+	short := regexp.MustCompile(`^(ws|s)_[0-9a-f]{6}$`)
+	long := regexp.MustCompile(`^e_[0-9a-f]{16}$`)
+	for i := 0; i < 100; i++ {
+		for _, id := range []string{NewWorkspaceID(), NewSessionID()} {
+			if !short.MatchString(id) {
+				t.Fatalf("bad short id: %q", id)
 			}
-			if seen[id] {
-				t.Fatalf("duplicate id: %q", id)
-			}
-			seen[id] = true
+		}
+		if id := NewEventID(); !long.MatchString(id) {
+			t.Fatalf("bad event id: %q", id)
 		}
 	}
+}
+
+// Event ids are generated per hook event, so they must not collide over a
+// realistic session lifetime. 100k draws from a 2^64 space: collision
+// probability ~3e-10, so a duplicate here means the generator is broken.
+func TestNewEventID_NoCollisions(t *testing.T) {
+	seen := make(map[string]bool, 100_000)
+	for i := 0; i < 100_000; i++ {
+		id := NewEventID()
+		if seen[id] {
+			t.Fatalf("duplicate event id: %q", id)
+		}
+		seen[id] = true
+	}
+}
+
+func TestNewUniqueID_RetriesOnCollision(t *testing.T) {
+	seq := []string{"s_taken", "s_taken", "s_free"}
+	gen := func() string { id := seq[0]; seq = seq[1:]; return id }
+	got := NewUniqueID(gen, func(id string) bool { return id == "s_taken" })
+	if got != "s_free" {
+		t.Fatalf("got %q", got)
+	}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic when every id is taken")
+		}
+	}()
+	NewUniqueID(func() string { return "x" }, func(string) bool { return true })
 }
 
 func TestValidateName(t *testing.T) {

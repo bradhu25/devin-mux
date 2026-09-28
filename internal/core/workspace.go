@@ -159,11 +159,12 @@ func (m *WorkspaceManager) Create(ctx context.Context, in CreateWorkspaceInput) 
 	}
 
 	// --- 2. reserve in state -----------------------------------------------
-	ws := &Workspace{ID: NewWorkspaceID(), Name: in.Name, Root: root, Status: WorkspaceCreating, CreatedAt: now}
+	ws := &Workspace{Name: in.Name, Root: root, Status: WorkspaceCreating, CreatedAt: now}
 	err := m.Store.Update(ctx, func(st *State) error {
 		if st.WorkspaceByName(in.Name) != nil {
 			return fmt.Errorf("%w: %s", ErrWorkspaceExists, in.Name)
 		}
+		ws.ID = NewUniqueID(NewWorkspaceID, func(id string) bool { return st.Workspace(id) != nil })
 		st.Workspaces = append(st.Workspaces, *ws)
 		return nil
 	})

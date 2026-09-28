@@ -83,11 +83,12 @@ func (m *SessionManager) Spawn(ctx context.Context, in SpawnInput) (*SpawnResult
 	others := len(st.SessionsIn(ws.ID))
 
 	// --- 2. reserve ----------------------------------------------------------
-	sess := Session{ID: NewSessionID(), WorkspaceID: ws.ID, Task: in.Task, CreatedAt: m.now()}
+	sess := Session{WorkspaceID: ws.ID, Task: in.Task, CreatedAt: m.now()}
 	if err := m.Store.Update(ctx, func(st *State) error {
 		if w := st.Workspace(ws.ID); w == nil || w.Status != WorkspaceReady {
 			return fmt.Errorf("%w: %s", ErrWorkspaceNotReady, ws.Name)
 		}
+		sess.ID = NewUniqueID(NewSessionID, func(id string) bool { return st.Session(id) != nil })
 		st.Sessions = append(st.Sessions, sess)
 		return nil
 	}); err != nil {
