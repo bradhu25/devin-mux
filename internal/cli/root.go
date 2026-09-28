@@ -20,6 +20,7 @@ func newRootCmd(version string) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newHookEventCmd())
+	a := &app{}
+	root.AddCommand(newHookEventCmd(), newWorkspaceCmd(a))
 	return root
 }

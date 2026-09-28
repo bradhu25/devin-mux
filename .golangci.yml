@@ -15,6 +15,12 @@ linters:
     - noctx
     - depguard
   settings:
+    errcheck:
+      # Writes to the user's terminal; failures are not actionable.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     depguard:
       rules:
         # core must never talk to external tools directly; only adapters may.
