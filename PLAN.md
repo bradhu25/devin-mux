@@ -23,7 +23,8 @@ manual, and each pain point compounds with session count:
   remembering which tab it's in. Resume (`devin -c`) is per-directory, so it
   works only if you remember which directory maps to which task.
 - **Multi-repo tasks are awkward.** A task spanning repos requires manually
-  creating a worktree per repo, then launching with `--add-dir` for each.
+  creating a worktree per repo, then `/add-dir` for each inside the session
+  (there is no CLI flag for it).
 - **Prior art doesn't cover Devin.** Claude Squad / Conductor / Crystal /
   Vibe Kanban solve this for Claude Code, mostly single-repo; nothing targets
   Devin CLI.
@@ -36,8 +37,8 @@ One tool owns the worktree-session lifecycle end to end:
   creates a named worktree set (git worktrees for up to N repos under a
   managed root) — isolation by default, cleanup with `dmux worktree rm`.
 - **One-command sessions.** `dmux spawn feature-x -t "fix auth"` launches a
-  Devin session in tmux, scoped to that worktree, multi-repo dirs wired up
-  via `--add-dir` automatically.
+  Devin session in tmux, scoped to that workspace, with all repo worktrees
+  in scope automatically.
 - **Live status board.** `dmux ls` (and later `dmux ui`) shows every
   worktree → session with hook-driven status: working / idle /
   awaiting-approval. The "which session needs me?" question has an answer.
@@ -55,24 +56,104 @@ One tool owns the worktree-session lifecycle end to end:
 
 ## Phase 0 — Scaffold & spike (validate riskiest assumptions first)
 
-- [ ] Scaffold Go module (`go mod init`, `cmd/dmux/main.go`, cobra root
-      command, `internal/` packages: `state`, `gitwt`, `tmux`, `devin`,
-      `hooks`), golangci-lint, Makefile
-- [ ] Spike 1: create a git worktree programmatically + launch `devin` in it
-      inside a tmux window; confirm session history binds to worktree dir
-      (`devin -c` resumes correctly per worktree)
-- [ ] Spike 2: multi-repo worktree — two repos' worktrees under one folder,
-      launch `devin --add-dir`; confirm workspace spans both
-- [ ] Spike 3: status hook — plugin `hooks.json` (SessionStart/Stop/
-      PermissionRequest/PostToolUse) invoking `dmux hook-event`, which
-      appends JSON lines to `~/.devin-mux/events/`; confirm orchestrator can
-      tail it for live status and measure hook invocation latency. Also
-      verify: (a) ~~`DMUX_SESSION_ID` env inherited by hooks~~ VERIFIED in
-      Spike 4; (b) which hooks fire after a
-      PermissionRequest is **approved**, **denied**, and **cancelled** — this
-      determines how approval_resolved is inferred; (c) a hook exiting 0 with
-      no stdout leaves the permission flow untouched; (d) ~~`Stop` per turn,
-      `SessionEnd` on exit~~ VERIFIED in Spike 4
+- [ ] Scaffold Go module — layout follows domain boundaries, not commands:
+
+```
+devin-mux/
+├── go.mod
+├── Makefile                  # build, test, lint, smoke
+├── cmd/dmux/main.go          # entry; wires cobra + DI of adapters into core
+├── internal/
+│   ├── cli/                  # cobra commands (thin: parse → call core → render)
+│   │   ├── root.go, workspace.go, spawn.go, jump.go, ls.go, kill.go,
+│   │   ├── resume.go, doctor.go, run.go (launch wrapper), hookevent.go
+│   ├── core/                 # orchestration logic; imports adapter INTERFACES only
+│   │   ├── types.go          # Workspace, WorkspaceRepo, Session, SessionEvent
+│   │   ├── workspace.go      # WorkspaceManager: create/rm sagas, rollback
+│   │   ├── session.go        # SessionManager: spawn/kill/resume
+│   │   ├── status.go         # reducer FSM + reconciler
+│   │   └── ports.go          # Git, Tmux, Devin, Store, EventLog interfaces
+│   ├── adapters/             # external tools; the ONLY place os/exec lives
+│   │   ├── git/              # worktree add/remove/list --porcelain, status
+│   │   ├── tmux/             # new-session/window, switch/attach, tags via @opts
+│   │   └── devin/            # launch args, `devin list --format json`, sessions.db (RO)
+│   ├── state/                # store.go (atomic write), lock.go (flock), events.go (O_APPEND)
+│   ├── hooks/                # normalize.go: raw Devin payload → SessionEvent
+│   └── ui/                   # huh picker (P1), Bubble Tea app (P2)
+└── test/
+    ├── integration/          # real git in temp repos; real tmux server (-L dmux-test)
+    └── smoke/                # scripted end-to-end with real devin (manual/opt-in)
+```
+
+      Key boundary: `core` depends on interfaces in `ports.go`; `adapters`
+      implement them. `core` never constructs a git/tmux command line.
+      Testing strategy: unit-test `core` with fakes; test each adapter
+      against the real tool in isolation (temp repos, isolated tmux socket);
+      smoke-test with real Devin only opt-in (`make smoke`) — **never launch
+      paid agent sessions in routine tests**.
+Spikes answer a question decisively; "the command ran" is not success.
+
+- [ ] **Spike 1 — Worktree + session lifecycle.** *Can we reliably start,
+      leave, return to, and resume a Devin session in a managed worktree?*
+      Success criteria:
+      - worktree created without modifying the original checkout (status,
+        branch, index untouched)
+      - Devin launches with cwd = the worktree; `DEVIN_PROJECT_DIR` in hook
+        payload confirms it
+      - detaching the tmux client does not terminate the agent
+      - reattaching returns to the same live process (same PID)
+      - after Devin exits, `devin -r <id>` restores the intended
+        conversation *in interactive mode* (re-confirm Spike 4's `-p` result)
+      - two histories in one worktree are distinguishable via `devin list
+        --format json`
+      - initial task prompt delivery: verify `devin -- "<prompt>"` starts an
+        interactive session with that prompt (docs say so; confirm)
+- [ ] **Spike 2 — Multi-repo workspace.** *Can one agent safely operate
+      across separate managed worktrees?* **Design change**: verified
+      2026-09-27 that `--add-dir` is NOT a CLI flag in 3000.11.3 (the
+      `[PATH]...` positional opens Devin Desktop). `/add-dir` exists only as
+      a runtime slash command. Primary approach to test: **launch Devin with
+      cwd = the workspace root** (`~/.devin-mux/workspaces/<name>/`) so every
+      repo worktree is a subdirectory of the single workspace dir. Fallback:
+      `tmux send-keys "/add-dir <path>" Enter` after launch (fragile; last
+      resort). Success criteria:
+      - two independent source repos → two worktrees under one workspace dir
+      - Devin's primary directory is the workspace root; `sessions.db`
+        `workspace_dirs` shows what Devin considers in-scope
+      - agent can read/edit/run git in both subrepos; edits land in the
+        managed worktrees, never the original checkouts
+      - per-repo `AGENTS.md`/`.devin/` rules in subdirs are still discovered
+        (docs: lazily, on access) — confirm
+      - single-repo workspace: cwd = the repo worktree directly (no wrapper
+        dir needed) — decide whether to always use the wrapper for uniformity
+      - repo names / paths containing spaces handled correctly
+- [ ] **Spike 3 — Hook-driven status.** *Can hooks reliably distinguish
+      working, idle, and blocked?* Success criteria:
+      - every managed session's events carry its `DMUX_SESSION_ID`
+        (~~env inheritance~~ VERIFIED in Spike 4)
+      - start/turn-completion/exit observable (~~Stop vs SessionEnd~~
+        VERIFIED in Spike 4)
+      - `PermissionRequest` produces an observable event; test what fires
+        after **approve**, **deny**, and **cancel** — determines how
+        approval_resolved is inferred, or whether we must surface "unknown"
+      - a hook exiting 0 with no stdout leaves the permission flow untouched
+      - hook failure (nonzero exit, crash, timeout) does not interrupt Devin
+      - events remain readable after the originating process exits
+      - hook invocation latency measured (`dmux hook-event` target: <5ms)
+      - **hook installation route decided** (see below)
+
+### Hook installation route (decision pending Spike 3)
+
+Three documented ways to register hooks; they are NOT interchangeable:
+
+| Route | Scope | Notes |
+| --- | --- | --- |
+| `~/.config/devin/config.json` `"hooks"` key | user-level, every session | **Preferred for dmux.** No repo pollution; our hook already ignores events without `DMUX_SESSION_ID`, so non-dmux sessions are unaffected. `dmux init` installs it (idempotent merge, never clobber user's other hooks) |
+| plugin `hooks.json` | every session where plugin installed | "best effort and fail open"; local (CLI/Desktop) only. Good as an *alternative distribution* (`devin plugins install`), not the primary |
+| `.devin/hooks.v1.json` in the worktree | project-level | VERIFIED working 2026-09-27, but writes a file into the user's repo worktree — reject as primary |
+
+Spike 3 must confirm the user-level route fires identically to the
+project-level one already verified.
 - [x] Spike 4 (critical): **specific-conversation resumption.** VERIFIED
       2026-09-27 on Devin CLI 3000.11.3 (non-interactive `-p` mode; re-check
       interactive in Spike 1):
@@ -396,6 +477,8 @@ Commands:
       work across all repos in a workspace before deleting it
 - [ ] `dmux doctor` — find/repair workspaces stuck mid-saga, dead tmux
       targets, orphaned dirs
+- [ ] `dmux init` — install user-level hook config (idempotent merge into
+      `~/.config/devin/config.json`), create `~/.devin-mux/`, run doctor
 - [ ] `dmux spawn <workspace> [-t "task prompt"]` — new Devin session in tmux
 - [ ] `dmux jump` — interactive picker (workspace → session) that switches
       tmux client to the chosen session; show status badges

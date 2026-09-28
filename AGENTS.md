@@ -9,8 +9,10 @@ sessions simultaneously:
   named unit containing git worktrees of 1..N repos (user picks the repo set).
   Lives under a managed root dir, e.g. `~/.devin-mux/workspaces/<id>/<repo>/`.
 - **Session** = one Devin CLI session scoped to a task, launched inside a
-  workspace. A workspace can host multiple sessions. Multi-repo workspaces
-  launch Devin with all repo dirs as workspace dirs (`--add-dir` / `/add-dir`).
+  workspace. A workspace can host multiple sessions. Multi-repo scope:
+  **there is NO `--add-dir` CLI flag** (verified 3000.11.3; `[PATH]...`
+  opens Devin Desktop). `/add-dir` is runtime-only. Plan: launch Devin with
+  cwd = workspace root so all repo worktrees are subdirectories (Spike 2).
 - Users can jump between all live sessions; all run concurrently.
 
 ## Key platform facts (verified against Devin CLI 3000.x docs)
@@ -39,6 +41,14 @@ sessions simultaneously:
   `SessionStart/End` command hooks receive JSON on stdin (incl. `session_id`),
   can write per-session status to a shared state file the orchestrator watches
   ("working / idle / awaiting approval").
+- **Hook installation route**: prefer user-level `~/.config/devin/config.json`
+  `"hooks"` key (installed by `dmux init`, no repo pollution; hook ignores
+  non-dmux sessions). Plugin `hooks.json` = "best effort, fail open", local
+  only — alternative distribution, not primary. Project `.devin/hooks.v1.json`
+  verified working but pollutes worktrees — rejected as primary.
+- **Verify CLI contract against the installed binary before hardcoding**
+  (`devin --help`, `devin acp --help`); Devin CLI evolves fast. Useful:
+  `devin list --format json` (sessions in cwd), `devin rm <id>`.
 - **Live status principles** (full design in PLAN.md): hooks emit
   *normalized* events (JSONL, contract independent of Devin payload so a
   Phase 3 ACP adapter plugs in unchanged); reducer FSM derives state;
@@ -109,3 +119,10 @@ cloud handoff integration.
 ## Project conventions
 
 - Plan lives in PLAN.md; keep it current as milestones complete.
+- Go layout by domain boundary (see PLAN.md): `internal/core` holds
+  orchestration and depends only on interfaces in `core/ports.go`;
+  `internal/adapters/{git,tmux,devin}` are the ONLY packages that use
+  `os/exec`. `internal/cli` is thin (parse → core → render).
+- Tests: unit-test core with fakes; adapters against real tools in isolation
+  (temp repos, `tmux -L dmux-test`); real-Devin smoke tests are opt-in only
+  (`make smoke`) — never launch paid agent sessions in routine tests.
