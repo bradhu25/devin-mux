@@ -66,8 +66,13 @@ sessions simultaneously:
   starts in ~1-2ms vs ~50-100ms for Node, and the same `dmux` binary can serve
   as the hook command. Stack: cobra (CLI), Bubble Tea + Lip Gloss + Bubbles
   (TUI), goreleaser (release).
-- **v1 multiplexer: tmux** — each session runs interactive `devin` in a tmux
-  window/pane; orchestrator provides picker to jump between them.
+- **v1 multiplexer: tmux** — one tmux session per workspace, one window per
+  Devin session; `dmux jump` = reconcile → huh picker → navigate. Inside
+  tmux (`$TMUX`): `switch-client` + `select-window`. Outside: `syscall.Exec`
+  into `tmux attach-session` (hand over the TTY, never spawn-and-wait).
+  Target by stable ids (`$N`/`@N`), never names; ids reset when the tmux
+  server restarts, so tag windows with user option `@dmux_session=<id>` at
+  spawn and verify on jump. Validation failure → mark exited, offer resume.
 - **Data model principles** (full schema in PLAN.md): stable logical IDs
   separate from display names (workspace `id` vs `name`; tmux stable
   `windowId` vs window name); physical paths recorded explicitly

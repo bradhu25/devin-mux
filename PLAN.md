@@ -232,6 +232,51 @@ Rules:
   (ids, paths, tmux targets, devinSessionId, timestamps). Reset = delete
   events dir, never corrupts records.
 
+### Navigation: `dmux jump` (design constraint)
+
+One place to find every session. Three steps: reconcile → pick → navigate.
+
+```
+Select a session:
+
+  feature-x
+    ● auth implementation       working
+    ! security review           awaiting approval
+
+  payment-fix
+    ○ validation tests          idle
+```
+
+Picker: `charmbracelet/huh` grouped select in Phase 1 (same Bubble Tea
+runtime as the Phase 2 `dmux ui`). `dmux jump <query>` also accepts a
+fuzzy/prefix match for non-interactive use.
+
+**Inside tmux vs outside tmux are different operations** (detect via `$TMUX`):
+
+| Context | Operation | Go implementation |
+| --- | --- | --- |
+| Inside tmux (`$TMUX` set) | Switch the *current client* to the target | `tmux switch-client -t <session>` then `tmux select-window -t @N` via `os/exec`; dmux exits normally |
+| Outside tmux | Attach the terminal to the target session | `tmux select-window -t @N` then **`syscall.Exec`** `tmux attach-session -t <session>` — replace the dmux process so tmux owns the TTY and signals; never spawn-and-wait |
+
+**Stable targets, not names.** Window names are user-renamable; store the
+tmux window ID (`@N`) in `Session.tmux.windowId`. But `@N` is stable only for
+the lifetime of the tmux *server* — after reboot/`kill-server`, IDs restart
+and an unrelated window may reuse `@12`. So before acting:
+
+1. Confirm the window exists and belongs to the expected managed session:
+   `tmux list-windows -t <session> -F '#{window_id}'`.
+2. **Positive identity via tmux user option**: at spawn, tag the window with
+   `tmux set-option -w -t @N @dmux_session <dmuxSessionId>`; on jump,
+   verify `tmux show-option -wv -t @N @dmux_session` matches. Membership +
+   tag = safe.
+3. If validation fails → the window is gone: update the record (lifecycle
+   exited/missing), tell the user, and offer `dmux resume` if a
+   `devinSessionId` is recorded. Never jump to a wrong window.
+
+tmux layout: one tmux session per workspace (`dmux-<workspaceName>`,
+session name also recorded — tmux sessions are renamable too, so record the
+tmux session ID `$N` alongside the name), one window per Devin session.
+
 ## Phase 1 — Core CLI (MVP)
 
 Data model (persisted as JSON under `~/.devin-mux/`). Design principles:
@@ -263,7 +308,7 @@ type Session = {
   id: string;
   workspaceId: string;   // stable reference, not the name
   task: string;
-  tmux: { sessionName: string; windowId: string }; // windowId is the stable @N id
+  tmux: { sessionName: string; sessionId: string; windowId: string }; // $N / @N stable ids; names are display-only
   devinSessionId?: string;  // enables `devin -r` resumption after exit
   lifecycle: "starting" | "running" | "exited" | "failed";
   activity: "working" | "idle" | "awaiting-approval" | "unknown";
@@ -292,8 +337,9 @@ Commands:
       <devinSessionId>` in its workspace
 
 Cross-cutting:
-- [ ] tmux adapter (session-per-workspace, window-per-Devin-session naming
-      scheme, attach/switch logic for inside vs outside tmux)
+- [ ] tmux adapter (session-per-workspace, window-per-Devin-session; inside
+      tmux → switch-client/select-window, outside → `syscall.Exec` attach;
+      `@dmux_session` window tag set at spawn and verified on jump)
 - [ ] State store: `config.json`/`state.json` split, atomic temp+rename
       writes, `flock`-guarded `Update()` transaction, O_APPEND single-write
       JSONL event appender
