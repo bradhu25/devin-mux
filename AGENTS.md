@@ -134,6 +134,18 @@ Claude Squad, Conductor, Crystal, Vibe Kanban do worktree-per-agent for Claude
 Code. None target Devin CLI. Differentiators: multi-repo worktree sets,
 cloud handoff integration.
 
+## Dev environment (this machine)
+
+- Go 1.27 (arm64), tmux 3.7c, git 2.39, gh 2.101 — all via Homebrew.
+- The default shell runs under Rosetta (`arch` → i386); Homebrew needs
+  `arch -arm64 brew ...` (and `--force-bottle` — local Xcode is too old to
+  build from source). Go itself is arm64 and builds native binaries with no
+  extra flags.
+- Devin CLI 3000.11.3 at `devin`; docs on disk at
+  `~/.local/share/devin/cli/_versions/<ver>/share/devin/docs`.
+- tmux experiments: always use an isolated server (`tmux -L dmux-test`) so
+  tests never touch the user's real tmux sessions.
+
 ## Project conventions
 
 - Plan lives in PLAN.md; keep it current as milestones complete.
