@@ -153,6 +153,11 @@ cloud handoff integration.
   orchestration and depends only on interfaces in `core/ports.go`;
   `internal/adapters/{git,tmux,devin}` are the ONLY packages that use
   `os/exec`. `internal/cli` is thin (parse → core → render).
-- Tests: unit-test core with fakes; adapters against real tools in isolation
-  (temp repos, `tmux -L dmux-test`); real-Devin smoke tests are opt-in only
-  (`make smoke`) — never launch paid agent sessions in routine tests.
+- Tests: four tiers, documented in `docs/TESTING.md` — unit (core with
+  fakes), adapter integration (real git/tmux, isolated), smoke (real Devin,
+  opt-in `make smoke` only), spikes (manual, results recorded). Never launch
+  paid agent sessions in routine tests. `make lint && make test` before
+  every commit.
+- **Commit messages use the template in `docs/TESTING.md`**: summary line,
+  then sections `What changed:` / `Why is this needed:` / `How was it
+  tested:` / `Additional notes/resources:`. Always.
