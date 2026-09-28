@@ -1,4 +1,4 @@
-# devin-fun — Multi-Session Devin Orchestrator
+# devin-mux — Multi-Session Devin Orchestrator
 
 ## Concept (memory — keep updated as scope evolves)
 
@@ -7,7 +7,7 @@ sessions simultaneously:
 
 - **Worktree** = a named workspace unit containing git worktrees of 1..N repos
   (user picks the repo set). Lives under a managed root dir, e.g.
-  `~/.devin-fun/worktrees/<name>/<repo>/`.
+  `~/.devin-mux/worktrees/<name>/<repo>/`.
 - **Session** = one Devin CLI session scoped to a task, launched inside a
   worktree. A worktree can host multiple sessions. Multi-repo worktrees launch
   Devin with all repo dirs as workspace dirs (`--add-dir` / `/add-dir`).

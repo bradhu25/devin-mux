@@ -1,4 +1,4 @@
-# PLAN — devin-fun
+# PLAN — devin-mux
 
 Workflow plan for building and shipping the worktree-session Devin orchestrator.
 
@@ -28,20 +28,20 @@ manual, and each pain point compounds with session count:
   Vibe Kanban solve this for Claude Code, mostly single-repo; nothing targets
   Devin CLI.
 
-### After (devin-fun v0.1)
+### After (devin-mux v0.1)
 
 One tool owns the worktree-session lifecycle end to end:
 
-- **One-command workspaces.** `dfun worktree new feature-x --repo api --repo web`
+- **One-command workspaces.** `dmux worktree new feature-x --repo api --repo web`
   creates a named worktree set (git worktrees for up to N repos under a
-  managed root) — isolation by default, cleanup with `dfun worktree rm`.
-- **One-command sessions.** `dfun spawn feature-x -t "fix auth"` launches a
+  managed root) — isolation by default, cleanup with `dmux worktree rm`.
+- **One-command sessions.** `dmux spawn feature-x -t "fix auth"` launches a
   Devin session in tmux, scoped to that worktree, multi-repo dirs wired up
   via `--add-dir` automatically.
-- **Live status board.** `dfun ls` (and later `dfun ui`) shows every
+- **Live status board.** `dmux ls` (and later `dmux ui`) shows every
   worktree → session with hook-driven status: working / idle /
   awaiting-approval. The "which session needs me?" question has an answer.
-- **Instant jumping.** `dfun jump` opens a picker across all live sessions
+- **Instant jumping.** `dmux jump` opens a picker across all live sessions
   and switches the tmux client straight to the chosen one.
 - **Everything concurrent.** All sessions keep running while you're elsewhere;
   worktree isolation makes parallelism safe rather than risky.
@@ -62,23 +62,23 @@ One tool owns the worktree-session lifecycle end to end:
 - [ ] Spike 2: multi-repo worktree — two repos' worktrees under one folder,
       launch `devin --add-dir`; confirm workspace spans both
 - [ ] Spike 3: status hook — plugin `hooks.json` (SessionStart/Stop/
-      PermissionRequest) writing JSON lines to `~/.devin-fun/state/`;
+      PermissionRequest) writing JSON lines to `~/.devin-mux/state/`;
       confirm orchestrator can tail it for live status
 
 ## Phase 1 — Core CLI (MVP)
 
-Data model (persisted as JSON under `~/.devin-fun/`):
+Data model (persisted as JSON under `~/.devin-mux/`):
 - `Worktree { name, repos: [{ path, branch, worktreePath }], createdAt }`
 - `Session { id, worktree, task, tmuxTarget, devinSessionId?, status, createdAt }`
 
 Commands:
-- [ ] `dfun worktree new <name> --repo <path>[@branch] ...` — create worktree set
-- [ ] `dfun worktree list / rm` — list, clean up (git worktree remove + prune)
-- [ ] `dfun spawn <worktree> [-t "task prompt"]` — new Devin session in tmux
-- [ ] `dfun jump` — interactive picker (worktree → session) that switches
+- [ ] `dmux worktree new <name> --repo <path>[@branch] ...` — create worktree set
+- [ ] `dmux worktree list / rm` — list, clean up (git worktree remove + prune)
+- [ ] `dmux spawn <worktree> [-t "task prompt"]` — new Devin session in tmux
+- [ ] `dmux jump` — interactive picker (worktree → session) that switches
       tmux client to the chosen session; show status badges
-- [ ] `dfun ls` — table of all worktrees/sessions with live status
-- [ ] `dfun kill <session>` — end a session (tmux + record)
+- [ ] `dmux ls` — table of all worktrees/sessions with live status
+- [ ] `dmux kill <session>` — end a session (tmux + record)
 
 Cross-cutting:
 - [ ] tmux adapter (session-per-worktree, window-per-Devin-session naming
@@ -88,9 +88,9 @@ Cross-cutting:
 
 ## Phase 2 — Polish & ship v0.1
 
-- [ ] `dfun ui` — full-screen ink TUI: tree of worktrees/sessions, status,
+- [ ] `dmux ui` — full-screen ink TUI: tree of worktrees/sessions, status,
       one-key jump
-- [ ] Docs: README with demo GIF, install (`npm i -g devin-fun`), quickstart
+- [ ] Docs: README with demo GIF, install (`npm i -g devin-mux`), quickstart
 - [ ] Tests: unit (state, git worktree ops) + smoke script
 - [ ] Publish to npm; tag v0.1.0
 
