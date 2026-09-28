@@ -21,8 +21,15 @@ sessions simultaneously:
   `dmux jump`) vs conversation resumption (process exited → `dmux resume`
   via `devin -r <devinSessionId>`). Since a workspace hosts N sessions,
   `devin -c` is NEVER a valid resume primitive for dmux. `devinSessionId` is
-  captured from the `session_id` field in hook stdin (`SessionStart`) —
-  Spike 4 must verify that id is what `devin -r` accepts.
+  captured from the `session_id` field in hook stdin (`SessionStart`).
+- **VERIFIED (2026-09-27, CLI 3000.11.3)**: hook `session_id` == the id
+  `devin -r` accepts (slug like `olive-turkey`); `-r` restores the specific
+  conversation even when it's not the most recent in the dir;
+  `SessionStart.source` is `"startup"` or `"resume"`; `DMUX_SESSION_ID` env
+  is inherited by hook subprocesses. **Caveat**: resuming from a different
+  cwd rebinds the session's working_directory — `dmux resume` must run from
+  the workspace dir. Devin's session store is SQLite at
+  `~/.local/share/devin/cli/sessions.db` (read-only use only).
 - Concurrent `devin` processes are fine; git worktrees prevent file/branch
   collisions between parallel agents.
 - Plugins CANNOT add UI to Devin (CLI or web). Plugin surface: skills, rules,

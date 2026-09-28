@@ -67,22 +67,33 @@ One tool owns the worktree-session lifecycle end to end:
       PermissionRequest/PostToolUse) invoking `dmux hook-event`, which
       appends JSON lines to `~/.devin-mux/events/`; confirm orchestrator can
       tail it for live status and measure hook invocation latency. Also
-      verify: (a) `DMUX_SESSION_ID` env set on the `devin` process is
-      inherited by hook subprocesses; (b) which hooks fire after a
+      verify: (a) ~~`DMUX_SESSION_ID` env inherited by hooks~~ VERIFIED in
+      Spike 4; (b) which hooks fire after a
       PermissionRequest is **approved**, **denied**, and **cancelled** — this
       determines how approval_resolved is inferred; (c) a hook exiting 0 with
-      no stdout leaves the permission flow untouched; (d) `Stop` fires per
-      turn and `SessionEnd` fires on exit (never confuse them)
-- [ ] Spike 4 (critical): **specific-conversation resumption.** Start two
-      Devin sessions in the same worktree dir, exit both, then verify:
-      (a) `devin -r <id>` restores the *specific* conversation, not the most
-      recent in the directory; (b) the `session_id` in hook stdin
-      (`SessionStart`) is the same identifier `devin -r` accepts — this is how
-      dmux captures `devinSessionId` without user input; (c) whether resume
-      works from a different cwd or is directory-bound; (d) how resumed
-      sessions surface in `SessionStart` (`source` field) so dmux can
-      distinguish resume from fresh start. If (a) or (b) fails, resumption
-      design must change before Phase 1.
+      no stdout leaves the permission flow untouched; (d) ~~`Stop` per turn,
+      `SessionEnd` on exit~~ VERIFIED in Spike 4
+- [x] Spike 4 (critical): **specific-conversation resumption.** VERIFIED
+      2026-09-27 on Devin CLI 3000.11.3 (non-interactive `-p` mode; re-check
+      interactive in Spike 1):
+      - (a) PASS — with two sessions in one dir, `devin -r olive-turkey`
+        restored the older, non-most-recent conversation correctly.
+      - (b) PASS — hook stdin `session_id` (`olive-turkey`) is exactly the id
+        `devin -r` accepts. IDs are `adjective-noun` slugs.
+      - (c) PASS with caveat — resume works from any cwd, BUT **rebinds the
+        session's `working_directory` to the new cwd** (observed in
+        sessions.db). `dmux resume` MUST launch from the workspace dir.
+      - (d) PASS — `SessionStart` payload: `{"source":"startup"|"resume",
+        "session_id":...}`. Resume is distinguishable.
+      - Bonus: `DMUX_SESSION_ID` env on the `devin` process IS inherited by
+        hook subprocesses (Spike 3a done). `Stop` payload includes
+        `last_assistant_message` + `prompt_id`; `SessionEnd` includes
+        `reason`. Both fired per turn / per exit as expected (Spike 3d done).
+      - Devin's local store: SQLite at `~/.local/share/devin/cli/sessions.db`,
+        table `sessions(id, working_directory, workspace_dirs, title,
+        last_activity_at, hidden, ...)`. Read-only access is a viable
+        secondary source for reconciliation (e.g. surfacing Devin's
+        auto-generated `title`). Never write to it.
 
 ### Resumption semantics (design constraint)
 
