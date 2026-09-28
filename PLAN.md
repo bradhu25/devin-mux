@@ -55,15 +55,18 @@ One tool owns the worktree-session lifecycle end to end:
 
 ## Phase 0 — Scaffold & spike (validate riskiest assumptions first)
 
-- [ ] Scaffold TS project (`npm init`, tsconfig, eslint, vitest, `bin` entry)
+- [ ] Scaffold Go module (`go mod init`, `cmd/dmux/main.go`, cobra root
+      command, `internal/` packages: `state`, `gitwt`, `tmux`, `devin`,
+      `hooks`), golangci-lint, Makefile
 - [ ] Spike 1: create a git worktree programmatically + launch `devin` in it
       inside a tmux window; confirm session history binds to worktree dir
       (`devin -c` resumes correctly per worktree)
 - [ ] Spike 2: multi-repo worktree — two repos' worktrees under one folder,
       launch `devin --add-dir`; confirm workspace spans both
 - [ ] Spike 3: status hook — plugin `hooks.json` (SessionStart/Stop/
-      PermissionRequest) writing JSON lines to `~/.devin-mux/state/`;
-      confirm orchestrator can tail it for live status
+      PermissionRequest/PostToolUse) invoking `dmux hook-event`, which
+      appends JSON lines to `~/.devin-mux/state/`; confirm orchestrator can
+      tail it for live status and measure hook invocation latency
 
 ## Phase 1 — Core CLI (MVP)
 
@@ -132,11 +135,14 @@ Cross-cutting:
 
 ## Phase 2 — Polish & ship v0.1
 
-- [ ] `dmux ui` — full-screen ink TUI: tree of worktrees/sessions, status,
-      one-key jump
-- [ ] Docs: README with demo GIF, install (`npm i -g devin-mux`), quickstart
-- [ ] Tests: unit (state, git worktree ops) + smoke script
-- [ ] Publish to npm; tag v0.1.0
+- [ ] `dmux ui` — full-screen Bubble Tea TUI: tree of workspaces/sessions,
+      status badges, one-key jump
+- [ ] Docs: README with demo GIF, install (Homebrew tap + `go install` +
+      release binaries), quickstart
+- [ ] Tests: `go test` unit (state, git worktree ops, tmux adapter with fake
+      exec) + smoke script
+- [ ] goreleaser: cross-platform binaries (darwin/linux, amd64/arm64), tag
+      v0.1.0
 
 ## Phase 3 — Later (validated by usage)
 

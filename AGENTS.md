@@ -34,8 +34,17 @@ sessions simultaneously:
 
 ## Architecture decisions
 
-- **Language: TypeScript/Node** — fast UX iteration (clack/ink pickers),
-  official ACP TS SDK for phase 2, npm distribution.
+- **Language: Go** (switched from TS before Phase 1). Rationale: this is a
+  systems CLI (spawning git/tmux/devin, filesystem state, event streams);
+  `os/exec` + `context` timeouts fit naturally; single static binary
+  (brew/curl install, no Node runtime); goroutines/channels map onto the
+  phase-3 multi-session event aggregation; ACP Go SDKs exist
+  (`coder/acp-go-sdk`, `caelis-labs/acp-go-sdk`, interop-tested vs official
+  SDKs). **Decisive factor: hook latency** — the status hook runs
+  synchronously inside Devin's tool loop on every tool call; a Go binary
+  starts in ~1-2ms vs ~50-100ms for Node, and the same `dmux` binary can serve
+  as the hook command. Stack: cobra (CLI), Bubble Tea + Lip Gloss + Bubbles
+  (TUI), goreleaser (release).
 - **v1 multiplexer: tmux** — each session runs interactive `devin` in a tmux
   window/pane; orchestrator provides picker to jump between them.
 - **Data model principles** (full schema in PLAN.md): stable logical IDs
