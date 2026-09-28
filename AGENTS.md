@@ -17,6 +17,12 @@ sessions simultaneously:
 
 - Devin sessions are **per-directory**: `devin -c` resumes most recent session
   in cwd; `devin -r <id>` resumes by ID. Worktree = natural isolation unit.
+- **Resumption is two different things**: tmux reattach (process alive →
+  `dmux jump`) vs conversation resumption (process exited → `dmux resume`
+  via `devin -r <devinSessionId>`). Since a workspace hosts N sessions,
+  `devin -c` is NEVER a valid resume primitive for dmux. `devinSessionId` is
+  captured from the `session_id` field in hook stdin (`SessionStart`) —
+  Spike 4 must verify that id is what `devin -r` accepts.
 - Concurrent `devin` processes are fine; git worktrees prevent file/branch
   collisions between parallel agents.
 - Plugins CANNOT add UI to Devin (CLI or web). Plugin surface: skills, rules,

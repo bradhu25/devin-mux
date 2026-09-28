@@ -67,6 +67,31 @@ One tool owns the worktree-session lifecycle end to end:
       PermissionRequest/PostToolUse) invoking `dmux hook-event`, which
       appends JSON lines to `~/.devin-mux/state/`; confirm orchestrator can
       tail it for live status and measure hook invocation latency
+- [ ] Spike 4 (critical): **specific-conversation resumption.** Start two
+      Devin sessions in the same worktree dir, exit both, then verify:
+      (a) `devin -r <id>` restores the *specific* conversation, not the most
+      recent in the directory; (b) the `session_id` in hook stdin
+      (`SessionStart`) is the same identifier `devin -r` accepts — this is how
+      dmux captures `devinSessionId` without user input; (c) whether resume
+      works from a different cwd or is directory-bound; (d) how resumed
+      sessions surface in `SessionStart` (`source` field) so dmux can
+      distinguish resume from fresh start. If (a) or (b) fails, resumption
+      design must change before Phase 1.
+
+### Resumption semantics (design constraint)
+
+Two distinct operations that must never be conflated:
+
+| Case | Process state | Correct action |
+| --- | --- | --- |
+| tmux reattachment | Devin process alive, user navigated away | `dmux jump` — switch to the existing window |
+| Conversation resumption | Devin process exited; conversation history persists | `dmux resume <session>` — relaunch `devin -r <devinSessionId>` in the workspace |
+
+`dmux resume` must restore the recorded conversation, never silently start a
+new one. Because a workspace can host multiple sessions, directory-based
+resume (`devin -c`) is **never** a valid resume primitive for dmux —
+`devinSessionId` is load-bearing. If it's missing for an exited session,
+`dmux resume` must say so rather than fall back to `-c`.
 
 ## Phase 1 — Core CLI (MVP)
 
