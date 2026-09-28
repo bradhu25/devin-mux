@@ -50,3 +50,11 @@ type WorktreeAddOpts struct {
 	BaseRef        string // required with NewBranch
 	ExistingBranch string // check out this existing branch
 }
+
+// Store is the port for persisted State. Read returns an atomic snapshot
+// without locking; Update runs fn in an exclusive read-modify-write
+// transaction and persists only if fn returns nil.
+type Store interface {
+	Read() (*State, error)
+	Update(ctx context.Context, fn func(*State) error) error
+}
