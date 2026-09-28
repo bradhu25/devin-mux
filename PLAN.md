@@ -65,8 +65,14 @@ One tool owns the worktree-session lifecycle end to end:
       launch `devin --add-dir`; confirm workspace spans both
 - [ ] Spike 3: status hook — plugin `hooks.json` (SessionStart/Stop/
       PermissionRequest/PostToolUse) invoking `dmux hook-event`, which
-      appends JSON lines to `~/.devin-mux/state/`; confirm orchestrator can
-      tail it for live status and measure hook invocation latency
+      appends JSON lines to `~/.devin-mux/events/`; confirm orchestrator can
+      tail it for live status and measure hook invocation latency. Also
+      verify: (a) `DMUX_SESSION_ID` env set on the `devin` process is
+      inherited by hook subprocesses; (b) which hooks fire after a
+      PermissionRequest is **approved**, **denied**, and **cancelled** — this
+      determines how approval_resolved is inferred; (c) a hook exiting 0 with
+      no stdout leaves the permission flow untouched; (d) `Stop` fires per
+      turn and `SessionEnd` fires on exit (never confuse them)
 - [ ] Spike 4 (critical): **specific-conversation resumption.** Start two
       Devin sessions in the same worktree dir, exit both, then verify:
       (a) `devin -r <id>` restores the *specific* conversation, not the most
@@ -92,6 +98,83 @@ new one. Because a workspace can host multiple sessions, directory-based
 resume (`devin -c`) is **never** a valid resume primitive for dmux —
 `devinSessionId` is load-bearing. If it's missing for an exited session,
 `dmux resume` must say so rather than fall back to `-c`.
+
+### Live status architecture (design constraint)
+
+dmux and Devin are separate processes; dmux needs an *observation* pipeline,
+not introspection. Hooks report facts; dmux interprets them.
+
+```
+Devin process ──hook──> dmux hook-event ──append──> ~/.devin-mux/events/<dmuxSessionId>.jsonl
+                                                            │
+dmux run (launch wrapper, Devin's parent) ──process_exited──┤
+                                                            ▼
+                                            reducer (FSM) ──> derived Session state
+                                                            │
+                                            reconciler (+ tmux/process liveness)
+                                                            ▼
+                                                      dmux ls / dmux ui
+```
+
+**Normalized event contract** (independent of Devin's raw hook payload — the
+Phase 3 ACP adapter emits the same events, so UI/reducer never change):
+
+```go
+type EventType string
+const (
+    SessionStarted    EventType = "session_started"
+    PromptSubmitted   EventType = "prompt_submitted"
+    ToolStarted       EventType = "tool_started"
+    ToolCompleted     EventType = "tool_completed"
+    ApprovalRequested EventType = "approval_requested"
+    ApprovalResolved  EventType = "approval_resolved" // inferred, see below
+    TurnCompleted     EventType = "turn_completed"
+    SessionEnded      EventType = "session_ended"
+    ProcessExited     EventType = "process_exited"    // from launch wrapper
+)
+
+type SessionEvent struct {
+    EventID        string    `json:"eventId"`
+    SessionID      string    `json:"sessionId"`      // dmux session id
+    DevinSessionID string    `json:"devinSessionId,omitempty"`
+    Type           EventType `json:"type"`
+    Timestamp      time.Time `json:"timestamp"`
+    Data           map[string]any `json:"data,omitempty"` // tool name, exit code, source...
+}
+```
+
+Hook → event mapping: `SessionStart`→session_started, `UserPromptSubmit`→
+prompt_submitted, `PreToolUse`→tool_started, `PostToolUse`→tool_completed,
+`PermissionRequest`→approval_requested, `Stop`→turn_completed,
+`SessionEnd`→session_ended. **There is no hook for "permission resolved"**:
+approval_resolved is inferred by the reducer from the next tool_started /
+tool_completed / turn_completed after an approval_requested.
+
+**Reducer (FSM)**: session_started/prompt_submitted/tool_started → running +
+working; approval_requested → awaiting-approval; turn_completed → idle;
+session_ended → exited + unknown; process_exited → exited (or failed if
+nonzero) + unknown.
+
+Rules:
+- **`Stop` is NOT `SessionEnd`.** Stop = end of a turn → idle. SessionEnd →
+  exited. Conflating them marks live conversations dead.
+- **Passive observer.** The `PermissionRequest` hook exits 0 with no
+  `decision` output — it must never approve/deny/alter the permission flow.
+  Hook failure must never interrupt the agent (swallow errors, exit 0).
+- **Correlation via env, not cwd.** `dmux spawn` sets `DMUX_SESSION_ID`
+  on the Devin process; the hook reads it (cwd is ambiguous when N sessions
+  share a workspace). Also record Devin's `session_id` from the payload to
+  maintain the dmux↔Devin id mapping. Ignore events with no known dmux id.
+- **Launch wrapper owns exit detection.** tmux window runs
+  `dmux run --session <id> -- devin ...`; as Devin's parent it always emits
+  process_exited (incl. crashes), independent of hooks firing.
+- **Reconciler precedence** (last event + liveness): process/tmux window
+  absent → exited/missing; alive + pending approval → awaiting-approval;
+  alive + recent working event → working; alive + last turn_completed → idle;
+  alive + undeterminable → **unknown**. A tmux window existing is not proof
+  Devin is alive (could be the wrapper/shell) — check the wrapper's child.
+- **Never infer idle from silence.** Long inference or long-running tests
+  produce no events while working. Unknown is honest; false idle is not.
 
 ## Phase 1 — Core CLI (MVP)
 
@@ -155,7 +238,9 @@ Commands:
 Cross-cutting:
 - [ ] tmux adapter (session-per-workspace, window-per-Devin-session naming
       scheme, attach/switch logic for inside vs outside tmux)
-- [ ] Status via hooks plugin (working / idle / awaiting-approval)
+- [ ] Status pipeline: `dmux hook-event` (hook writer) + `dmux run` (launch
+      wrapper w/ process_exited) + JSONL event store + reducer + reconciler
+- [ ] Hooks plugin (`hooks.json`) shipping the `dmux hook-event` bindings
 - [ ] Graceful degradation when tmux/devin missing; doctor command
 
 ## Phase 2 — Polish & ship v0.1

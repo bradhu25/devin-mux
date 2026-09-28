@@ -32,6 +32,14 @@ sessions simultaneously:
   `SessionStart/End` command hooks receive JSON on stdin (incl. `session_id`),
   can write per-session status to a shared state file the orchestrator watches
   ("working / idle / awaiting approval").
+- **Live status principles** (full design in PLAN.md): hooks emit
+  *normalized* events (JSONL, contract independent of Devin payload so a
+  Phase 3 ACP adapter plugs in unchanged); reducer FSM derives state;
+  reconciler cross-checks process liveness. `Stop` = turn ended → idle, NOT
+  exited (`SessionEnd` → exited). Observer is passive (PermissionRequest hook
+  exits 0, no decision). Correlate via `DMUX_SESSION_ID` env, never cwd.
+  Launch wrapper `dmux run` is Devin's parent → owns `process_exited`
+  detection. Never infer idle from silence — report unknown.
 - `devin acp` runs a session as a headless JSON-RPC-over-stdio subprocess
   (structured events: messages, tool calls, plans, permission requests) —
   foundation for a future custom dashboard UI (phase 2).
