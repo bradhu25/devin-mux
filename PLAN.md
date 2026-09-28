@@ -54,6 +54,32 @@ One tool owns the worktree-session lifecycle end to end:
 - Mixed local/cloud board via `devin --cloud` and `/handoff` — scale-out
   story none of the Claude-Code-era tools have.
 
+## Architectural decisions (resolved before implementation)
+
+**Guiding principle — four identities, four lifetimes.** A workspace, a tmux
+window, an OS process, and a Devin conversation are four different things
+with different identifiers and lifetimes:
+
+| Thing | Identifier | Lifetime | Owner |
+| --- | --- | --- | --- |
+| Workspace | `ws_*` (dmux) | until `dmux workspace rm` | dmux |
+| tmux session/window | `$N` / `@N` + `@dmux_*` tags | tmux server lifetime | tmux |
+| OS process | PID (observed by `dmux run` wrapper) | until exit | OS |
+| Devin conversation | `devinSessionId` (slug) | until `devin rm` | Devin |
+
+Mapping them correctly is the foundation of navigation, termination, and
+resumption. Never let one stand in for another.
+
+| # | Decision | Resolution |
+| --- | --- | --- |
+| 1 | Multiple active agents per workspace? | **Permitted.** Isolation is **workspace-level, not session-level** — two sessions in one workspace share files and a branch. Documented prominently; `dmux spawn` prints a one-line notice when a workspace already has a running session. Recommended pattern: one workspace per task, sessions within it for sub-tasks that the user knows don't conflict. |
+| 2 | Branch naming and ownership | `WorkspaceRepo.createdBranch` records provenance. Default branch name `dmux/<workspace-name>`; `--repo path@branch` uses an existing branch (createdBranch=false). Only dmux-created branches are ever deletable, only via `-d`. |
+| 3 | What identifies a resumable conversation? | Native `devinSessionId`, captured from hook `session_id` — **verified** identical to what `devin -r` accepts. Directory-based resume is never used. |
+| 4 | Source of truth for status | None is unquestionable. Hook events = observations; tmux/process checks = liveness evidence; `process_exited` from the wrapper = authoritative for exit. Persisted status is a derived snapshot recomputed on read. |
+| 5 | How hooks get installed | User-level `~/.config/devin/config.json` `"hooks"` via `dmux init`, idempotent JSON merge that never overwrites existing user hooks (append to arrays, dedupe by command). Plugin route as alternative. Confirmed by Spike 3. |
+| 6 | Partial success | Sagas with transitional states (`creating`/`deleting`/`failed`) and reverse compensation; `dmux doctor` recovers after interruption. |
+| 7 | One tmux namespace? | **Same tmux server as the user** (a separate `-L` socket would break `switch-client` across servers). Managed sessions are named `dmux-<workspace>` AND tagged (`@dmux_workspace=<id>` on the session, `@dmux_session=<id>` on windows). dmux only ever acts on targets carrying its tags; name prefix alone is never sufficient. It never lists, modifies, or kills untagged user sessions. |
+
 ## Phase 0 — Scaffold & spike (validate riskiest assumptions first)
 
 - [ ] Scaffold Go module — layout follows domain boundaries, not commands:
@@ -424,6 +450,19 @@ Rules:
 
 ## Phase 1 — Core CLI (MVP)
 
+### Execution order: vertical slices, each demoable end-to-end
+
+Every milestone exercises real external dependencies; no abstract
+infrastructure is built ahead of the integration that proves it.
+
+| Milestone | Slice | Demo |
+| --- | --- | --- |
+| **M1 — Workspace creation** (git) | git adapter, WorkspaceManager (create saga incl. rollback), state store + flock, workspace records | `dmux workspace new feature-x --repo api` → `dmux workspace list` |
+| **M2 — Session execution** (tmux + Devin) | tmux adapter (ids, tags, switch/attach), `dmux run` wrapper, SessionManager.spawn, session records, jump picker | `dmux spawn feature-x -t "Fix authentication"` → `dmux jump` |
+| **M3 — Observability** (hooks) | `dmux hook-event`, normalize, JSONL events, reducer FSM, reconciler, `dmux init` hook install | `dmux ls` — status changes live as the agent works, requests permission, finishes |
+| **M4 — Lifecycle completeness** (reliability) | kill, resume, workspace rm saga, branch policy, `diff/status`, `doctor` recovery | kill a session, resume it, remove a dirty workspace safely |
+| **M5 — Product experience** (v0.1) | Bubble Tea `dmux ui`, tests, README, goreleaser, Homebrew tap | = Phase 2 |
+
 Data model (persisted as JSON under `~/.devin-mux/`). Design principles:
 **stable logical IDs** distinct from display names (renames don't cascade;
 tmux referenced by stable window ID, not window name), physical paths recorded
@@ -566,3 +605,12 @@ hook payloads, invokes git, or knows tmux topology.
 - Spike before building: each phase-0 spike de-risks a core assumption
 - Keep every milestone demoable end-to-end
 - Update AGENTS.md when conceptual decisions change; keep this file current
+- **Stable core, replaceable integrations**: CLI/TUI → Workspace + Session
+  Managers → {Git, tmux, Devin, Event} adapters → persistent state. The
+  move from tmux/hooks to ACP must not require rewriting the managers, git
+  lifecycle, state model, or user-facing commands.
+- The three areas that deserve the most care: (1) session identity and
+  ownership — four things, four ids, four lifetimes; (2) status
+  observability — the differentiator, and the least certain integration;
+  (3) lifecycle consistency — no atomic transaction spans git/tmux/Devin/
+  state, so partial failure is handled explicitly everywhere.

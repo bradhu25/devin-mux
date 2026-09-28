@@ -65,6 +65,18 @@ sessions simultaneously:
 
 ## Architecture decisions
 
+- **Four identities, four lifetimes** — workspace (`ws_*`), tmux window
+  (`@N` + tag), OS process (PID via wrapper), Devin conversation (slug id).
+  Never let one stand in for another. Full resolved-decisions table in
+  PLAN.md. Notable: multi-session per workspace is PERMITTED with isolation
+  documented as workspace-level (spawn warns); dmux shares the user's tmux
+  server (separate socket would break switch-client) but only ever acts on
+  targets carrying `@dmux_*` tags; default branch name `dmux/<workspace>`.
+- **Build order**: vertical slices M1 workspace (git) → M2 sessions
+  (tmux+Devin) → M3 observability (hooks) → M4 lifecycle/reliability →
+  M5 UI/ship. Each demoable end-to-end; no abstract infra ahead of its
+  integration.
+
 - **Language: Go** (switched from TS before Phase 1). Rationale: this is a
   systems CLI (spawning git/tmux/devin, filesystem state, event streams);
   `os/exec` + `context` timeouts fit naturally; single static binary
