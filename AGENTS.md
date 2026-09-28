@@ -75,6 +75,14 @@ sessions simultaneously:
   (starting/running/exited/failed) kept orthogonal to **activity**
   (working/idle/awaiting-approval/unknown) — collapse only for display.
   `devinSessionId` recorded to enable `devin -r` resumption after exit.
+- **Persistence** (full design in PLAN.md): filesystem only in v0.1, under
+  `~/.devin-mux/`. `config.json` (user) ≠ `state.json` (machine). State
+  writes are atomic (same-dir temp + rename) AND serialized via `flock` on
+  `state.lock` (kernel-released → no stale locks). Events: one JSONL file per
+  dmux session; many short-lived appenders (hooks, wrapper) made safe by
+  O_APPEND + one `write()` per line. Derived lifecycle/activity are never
+  persisted — recomputed from events + liveness. Workspace dirs are named at
+  creation and never moved on rename (path recorded explicitly).
 - Phase 2 (later): ACP-based multi-session dashboard (own UI, unified
   permission inbox), replacing/augmenting tmux.
 

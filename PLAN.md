@@ -187,6 +187,51 @@ Rules:
 - **Never infer idle from silence.** Long inference or long-running tests
   produce no events while working. Unknown is honest; false idle is not.
 
+### Persistence (design constraint)
+
+Filesystem-backed; no database in v0.1 (SQLite is the future replacement if
+volume/query needs justify it — not before).
+
+```
+~/.devin-mux/
+├── config.json          # static settings: workspaces root, naming prefs, tmux prefix
+├── state.json           # dynamic: Workspace + Session records
+├── state.lock           # flock target for read-modify-write transactions
+├── events/
+│   └── <dmuxSessionId>.jsonl   # per-session append-only event log
+└── workspaces/
+    └── <name>/<repo>/   # git worktrees; dir named at creation, NEVER moved on
+                         # rename (worktreePath is recorded explicitly in state)
+```
+
+Rules:
+- **Config ≠ state.** `config.json` is user-edited and rarely changes;
+  `state.json` is machine-owned. Never mix.
+- **Atomic state writes.** Write to a temp file *in the same directory*,
+  fsync, `os.Rename` over `state.json`, fsync the directory. Readers see the
+  old complete document or the new one, never a torn write.
+- **Atomicity ≠ concurrency control.** Two concurrent `dmux spawn` calls
+  doing read-modify-write would lose a record. All mutations go through
+  `state.Update(ctx, func(*State) error)` which acquires an exclusive
+  `flock` on `state.lock`, reads, modifies, atomically writes, releases.
+  Use `flock` (via `gofrs/flock`), not a PID lockfile: the kernel releases
+  it on process death, so **stale locks cannot occur**. Contention: block
+  with a context timeout (e.g. 5s), then fail loudly.
+- **Per-session event files, multiple short-lived appenders.** Writers are
+  each hook invocation (separate process) plus the `dmux run` wrapper. Safe
+  because every event is one JSONL line written with **`O_APPEND` in a
+  single `write()`** — POSIX guarantees such appends don't interleave. Never
+  buffer/split a line across writes. No lock needed on event files.
+- **Event ordering** ≈ arrival order. Parallel `PreToolUse` hooks (batched
+  tool calls) may land out of order; `timestamp` + `eventId` disambiguate.
+  Reducer must tolerate this (e.g. tool_completed before tool_started).
+- **Read path never locks.** `dmux ls`/`ui` read `state.json` (atomic
+  snapshot) and tail event files without acquiring `state.lock`.
+- **Derived state is not persisted.** lifecycle/activity are recomputed from
+  events + liveness on read; `state.json` holds only facts dmux authored
+  (ids, paths, tmux targets, devinSessionId, timestamps). Reset = delete
+  events dir, never corrupts records.
+
 ## Phase 1 — Core CLI (MVP)
 
 Data model (persisted as JSON under `~/.devin-mux/`). Design principles:
@@ -249,6 +294,9 @@ Commands:
 Cross-cutting:
 - [ ] tmux adapter (session-per-workspace, window-per-Devin-session naming
       scheme, attach/switch logic for inside vs outside tmux)
+- [ ] State store: `config.json`/`state.json` split, atomic temp+rename
+      writes, `flock`-guarded `Update()` transaction, O_APPEND single-write
+      JSONL event appender
 - [ ] Status pipeline: `dmux hook-event` (hook writer) + `dmux run` (launch
       wrapper w/ process_exited) + JSONL event store + reducer + reconciler
 - [ ] Hooks plugin (`hooks.json`) shipping the `dmux hook-event` bindings
