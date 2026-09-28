@@ -539,7 +539,7 @@ infrastructure is built ahead of the integration that proves it.
 | Milestone | Slice | Demo |
 | --- | --- | --- |
 | **M1 — Workspace creation** (git) — **DONE 2026-09-28** | git adapter, WorkspaceManager (create saga incl. rollback), state store + flock, workspace records, workspace AGENTS.md map | `dmux workspace new feature-x --repo api` → `dmux workspace list` |
-| **M2 — Session execution** (tmux + Devin) | tmux adapter (ids, tags, switch/attach), `dmux run` wrapper, SessionManager.spawn, session records, jump picker | `dmux spawn feature-x -t "Fix authentication"` → `dmux jump` |
+| **M2 — Session execution** (tmux + Devin) — **DONE 2026-09-28** | tmux adapter (ids, tags, switch/attach), `dmux run` wrapper, SessionManager.spawn, session records, jump picker | `dmux spawn feature-x -t "Fix authentication"` → `dmux jump` (both interactive paths verified live) |
 | **M3 — Observability** (hooks) | `dmux hook-event`, normalize, JSONL events, reducer FSM, reconciler, `dmux init` hook install | `dmux ls` — status changes live as the agent works, requests permission, finishes |
 | **M4 — Lifecycle completeness** (reliability) | kill, resume, workspace rm saga, branch policy, `diff/status`, `doctor` recovery | kill a session, resume it, remove a dirty workspace safely |
 | **M5 — Product experience** (v0.1) | Bubble Tea `dmux ui`, tests, README, goreleaser, Homebrew tap | = Phase 2 |
@@ -603,9 +603,9 @@ Commands:
       targets, orphaned dirs
 - [ ] `dmux init` — install user-level hook config (idempotent merge into
       `~/.config/devin/config.json`), create `~/.devin-mux/`, run doctor
-- [ ] `dmux spawn <workspace> [-t "task prompt"]` — new Devin session in tmux
-- [ ] `dmux jump` — interactive picker (workspace → session) that switches
-      tmux client to the chosen session; show status badges
+- [x] `dmux spawn <workspace> [-t "task prompt"]` — new Devin session in tmux (M2)
+- [x] `dmux jump [query]` — picker / id / task query; switch-client inside
+      tmux, exec attach outside; tag-validated (M2). Status badges → M3
 - [ ] `dmux ls` — table of all workspaces/sessions with lifecycle + activity
 - [ ] `dmux kill <session>` — end a session (tmux + record)
 - [ ] `dmux resume <session>` — relaunch an exited session via `devin -r
