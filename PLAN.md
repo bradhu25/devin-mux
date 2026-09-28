@@ -538,7 +538,7 @@ infrastructure is built ahead of the integration that proves it.
 
 | Milestone | Slice | Demo |
 | --- | --- | --- |
-| **M1 — Workspace creation** (git) | git adapter, WorkspaceManager (create saga incl. rollback), state store + flock, workspace records | `dmux workspace new feature-x --repo api` → `dmux workspace list` |
+| **M1 — Workspace creation** (git) — **DONE 2026-09-28** | git adapter, WorkspaceManager (create saga incl. rollback), state store + flock, workspace records, workspace AGENTS.md map | `dmux workspace new feature-x --repo api` → `dmux workspace list` |
 | **M2 — Session execution** (tmux + Devin) | tmux adapter (ids, tags, switch/attach), `dmux run` wrapper, SessionManager.spawn, session records, jump picker | `dmux spawn feature-x -t "Fix authentication"` → `dmux jump` |
 | **M3 — Observability** (hooks) | `dmux hook-event`, normalize, JSONL events, reducer FSM, reconciler, `dmux init` hook install | `dmux ls` — status changes live as the agent works, requests permission, finishes |
 | **M4 — Lifecycle completeness** (reliability) | kill, resume, workspace rm saga, branch policy, `diff/status`, `doctor` recovery | kill a session, resume it, remove a dirty workspace safely |
@@ -590,9 +590,10 @@ process gone (resumable if `devinSessionId` recorded). Collapse for display,
 never in storage.
 
 Commands:
-- [ ] `dmux workspace new <name> --repo <path>[@branch] ...` — create workspace
+- [x] `dmux workspace new <name> --repo <path>[@branch] ...` — create workspace
       (git worktree per repo under the managed root) and write the
-      workspace-root `AGENTS.md` map
+      workspace-root `AGENTS.md` map (M1)
+- [x] `dmux workspace list` (M1)
 - [ ] `dmux workspace list / rm / rename` — list, clean up (saga: refuse if
       running unless `--stop`, refuse if dirty unless `--discard`, keep
       branches unless `--delete-branches`), rename (display name only)
