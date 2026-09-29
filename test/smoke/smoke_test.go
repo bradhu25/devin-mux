@@ -170,22 +170,39 @@ func TestLifecycle(t *testing.T) {
 		t.Fatalf("run `dmux init` with this binary first (%s):\n%s", h.bin, out)
 	}
 
-	// Workspace.
+	// Workspace: a repo group, no worktrees yet.
 	out := h.must("workspace", "new", "feature-x", "--repo", api, "--repo", web)
-	if !strings.Contains(out, "api/") || !strings.Contains(out, "web/") || !strings.Contains(out, "new branch") {
+	if !strings.Contains(out, "api/") || !strings.Contains(out, "web/") || !strings.Contains(out, "sessions branch from HEAD") {
 		t.Fatalf("workspace new:\n%s", out)
 	}
-	if !fileExists(filepath.Join(h.root, "workspaces", "feature-x", "AGENTS.md")) {
-		t.Fatal("workspace AGENTS.md map missing")
-	}
 	h.mustFail("already exists", "workspace", "new", "feature-x", "--repo", api)
+	for _, r := range []string{api, web} {
+		if wt, _ := exec.Command("git", "-C", r, "worktree", "list").Output(); strings.Count(strings.TrimSpace(string(wt)), "\n") != 0 {
+			t.Fatalf("workspace new must create no worktrees:\n%s", wt)
+		}
+	}
 
-	// Two concurrent sessions.
-	s1 := h.sessionID(h.must("spawn", "feature-x", "-t", "Reply with exactly the word ALPHA and nothing else. Do not use tools."))
-	out = h.must("spawn", "feature-x", "-t", "Reply with exactly the word BRAVO and nothing else. Do not use tools.")
-	s2 := h.sessionID(out)
-	if !strings.Contains(out, "1 other session") {
-		t.Fatalf("second spawn should note shared isolation:\n%s", out)
+	// Two concurrent sessions, each in its own worktrees on its own branch.
+	out = h.must("spawn", "feature-x", "-t", "Reply with exactly the word ALPHA and nothing else. Do not use tools.")
+	s1 := h.sessionID(out)
+	if !strings.Contains(out, "dmux/feature-x/reply-with-exactly-the-word-alpha") {
+		t.Fatalf("spawn should report the task branch:\n%s", out)
+	}
+	s2 := h.sessionID(h.must("spawn", "feature-x", "-t", "Reply with exactly the word BRAVO and nothing else. Do not use tools."))
+	for _, sid := range []string{s1, s2} {
+		if !fileExists(filepath.Join(h.root, "workspaces", "feature-x", sid, "AGENTS.md")) || !fileExists(filepath.Join(h.root, "workspaces", "feature-x", sid, "api", ".git")) {
+			t.Fatalf("session %s should have its own dir with worktrees and a map", sid)
+		}
+	}
+	for _, r := range []string{api, web} {
+		wt, _ := exec.Command("git", "-C", r, "worktree", "list").Output()
+		if strings.Count(strings.TrimSpace(string(wt)), "\n") != 2 {
+			t.Fatalf("each session should add one worktree per repo:\n%s", wt)
+		}
+	}
+	ls := h.must("ls")
+	if !strings.Contains(ls, "BRANCH") || strings.Count(ls, "dmux/feature-x/") != 2 {
+		t.Fatalf("ls should show a branch per session:\n%s", ls)
 	}
 
 	// Status: both reach idle via hooks; devin ids captured.
@@ -195,7 +212,7 @@ func TestLifecycle(t *testing.T) {
 	if len(h.devin) != 2 {
 		t.Fatalf("devinSessionId not captured for both sessions: %v", h.devin)
 	}
-	ls := h.must("ls", "-v")
+	ls = h.must("ls", "-v")
 	if !strings.Contains(ls, "» ALPHA") || !strings.Contains(ls, "» BRAVO") {
 		t.Fatalf("ls -v should show last messages:\n%s", ls)
 	}
@@ -229,18 +246,30 @@ func TestLifecycle(t *testing.T) {
 		t.Fatal("resume must reuse the recorded conversation, not create a new one")
 	}
 
-	// Workspace status: clean; then dirty -> rm refuses; then remove.
-	if out := h.must("workspace", "status", "feature-x"); !strings.Contains(out, "clean — nothing would be lost") {
+	// Status per session: clean; dirty s2 -> only s2 is unsafe; rm refuses.
+	if out := h.must("workspace", "status", "feature-x"); strings.Count(out, "clean — nothing would be lost") != 4 {
 		t.Fatalf("status:\n%s", out)
 	}
-	if err := os.WriteFile(filepath.Join(h.root, "workspaces", "feature-x", "web", "junk.txt"), []byte("x"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(h.root, "workspaces", "feature-x", s2, "web", "junk.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if out := h.must("session", "status", s1); strings.Contains(out, "junk.txt") {
+		t.Fatalf("s1 must not see s2's changes (isolation):\n%s", out)
 	}
 	h.mustFail("--stop", "workspace", "rm", "feature-x")
 	h.mustFail("--discard", "workspace", "rm", "feature-x")
 	h.mustFail("pass --yes", "workspace", "rm", "feature-x", "--stop", "--discard")
-	out = h.must("workspace", "rm", "feature-x", "--stop", "--discard", "--delete-branches", "--yes")
-	for _, want := range []string{"stopped sessions", "removed worktrees: api, web", "deleted branches:  api@dmux/feature-x, web@dmux/feature-x", "Devin conversations kept"} {
+	// Single-session removal keeps the rest.
+	h.mustFail("--discard", "rm", s2, "--stop", "--yes")
+	out = h.must("rm", s2, "--stop", "--discard", "--delete-branches", "--yes")
+	if !strings.Contains(out, "removed worktrees: "+s2+"/api, "+s2+"/web") || !strings.Contains(out, "deleted branches") {
+		t.Fatalf("rm session:\n%s", out)
+	}
+	if !fileExists(filepath.Join(h.root, "workspaces", "feature-x", s1, "api")) {
+		t.Fatal("removing s2 must leave s1's worktrees")
+	}
+	out = h.must("workspace", "rm", "feature-x", "--stop", "--delete-branches", "--yes")
+	for _, want := range []string{"Removed workspace feature-x", "removed sessions:  " + s1, "stopped sessions", "removed worktrees: " + s1 + "/api, " + s1 + "/web", "deleted branches", "Devin conversations kept"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("rm output missing %q:\n%s", want, out)
 		}
@@ -296,6 +325,36 @@ func TestServerRestart(t *testing.T) {
 	}
 	h.must("kill", s)
 	h.must("workspace", "rm", "w", "--yes", "--delete-branches")
+}
+
+// TestOneStepNewAndJoin: `dmux new` creates workspace + session; `--in`
+// shares worktrees explicitly; owner removal is refused while shared.
+func TestOneStepNewAndJoin(t *testing.T) {
+	h := newHarness(t)
+	api := h.repo("api")
+	out := h.must("new", "w", "--repo", api, "-t", "Reply with exactly DELTA and nothing else. Do not use tools.")
+	if !strings.Contains(out, "Created workspace w") || !strings.Contains(out, "Spawned session") {
+		t.Fatalf("new:\n%s", out)
+	}
+	owner := h.sessionID(out[strings.Index(out, "Spawned session"):])
+	h.waitStatus(owner, "idle", 60*time.Second)
+	out = h.must("spawn", "w", "-t", "Reply with exactly ECHO and nothing else. Do not use tools.", "--in", "delta")
+	joiner := h.sessionID(out)
+	if !strings.Contains(out, "shares worktrees with "+owner) {
+		t.Fatalf("join:\n%s", out)
+	}
+	h.waitStatus(joiner, "idle", 60*time.Second)
+	h.devin = h.devinIDs()
+	if wt, _ := exec.Command("git", "-C", api, "worktree", "list").Output(); strings.Count(strings.TrimSpace(string(wt)), "\n") != 1 {
+		t.Fatalf("join must not add a worktree:\n%s", wt)
+	}
+	if ls := h.must("ls"); !strings.Contains(ls, "↳ "+owner) {
+		t.Fatalf("ls should mark the joiner:\n%s", ls)
+	}
+	h.mustFail("share these worktrees", "rm", owner, "--stop", "--yes")
+	h.must("rm", joiner, "--stop", "--yes")
+	h.must("rm", owner, "--stop", "--yes", "--delete-branches")
+	h.must("workspace", "rm", "w", "--yes")
 }
 
 // TestConcurrentSpawns exercises the state lock: several spawns at once

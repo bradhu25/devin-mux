@@ -5,10 +5,10 @@ its own git worktree, and always know which one needs you.
 
 ```
 $ dmux ls
-WORKSPACE    SESSION   STATUS                      TASK                       LAST EVENT                  DEVIN
-feature-x    s_0a7ae6  ● working                   Fix the auth bug in api/   tool_started 3s ago         olive-turkey
-feature-x    s_3c1751  ! awaiting-approval (exec)  Add tests for web/         approval_requested 40s ago  glaze-toque
-payment-fix  s_d40b7c  ○ idle                      Validate refund edge…      turn_completed 2m ago       dapper-device
+WORKSPACE    SESSION   STATUS                      TASK                       BRANCH                              LAST EVENT
+feature-x    s_0a7ae6  ● working                   Fix the auth bug in api/   dmux/feature-x/fix-the-auth-bug     tool_started 3s ago
+feature-x    s_3c1751  ! awaiting-approval (exec)  Add tests for web/         dmux/feature-x/add-tests-for-web    approval_requested 40s ago
+payment-fix  s_d40b7c  ○ idle                      Validate refund edge…      dmux/payment-fix/validate-refund…   turn_completed 2m ago
 ```
 
 **Status: v0.** The command-line tool is complete and validated end to end
@@ -17,10 +17,13 @@ not built. Everything below works today, from the terminal, with no UI.
 
 ## What it does
 
-- **Workspaces** — a named set of git worktrees, one per repo, under
-  `~/.devin-mux/workspaces/<name>/`. Parallel agents never share a checkout.
-- **Sessions** — Devin CLI sessions running detached in tmux, with the
-  workspace root as their working directory so every repo is in scope.
+- **Workspaces** — your unit of work (a project, workstream, feature): a name
+  and the set of repos it spans. A workspace owns no worktrees itself.
+- **Sessions** — one Devin agent each, running detached in tmux, with **its own
+  git worktree and branch per repo** under
+  `~/.devin-mux/workspaces/<workspace>/<session>/<repo>/`. Spawn three sessions
+  in a workspace and you get three branches and three future PRs; agents never
+  share files unless you explicitly ask (`--in`).
 - **Live status** — `working` / `idle` / `awaiting-approval` / `exited`,
   derived from Devin's lifecycle hooks, the tmux window, and Devin's own
   record of tool-call outcomes (so a permission you *denied* shows `idle`,
@@ -63,14 +66,17 @@ dmux started; your other Devin sessions are ignored.
 ## Quick start
 
 ```bash
-# 1. A workspace: one worktree per repo, on a new branch dmux/<name>
+# 1. A workspace: the repos your work spans (no worktrees yet)
 dmux workspace new feature-x --repo ~/code/api --repo ~/code/web
 
-# 2. Sessions: each runs in its own tmux window, cwd = the workspace root.
-#    -t is the task: Devin's first prompt, and the session's label from then on.
+# 2. Sessions: each gets its own worktree of every repo, on its own branch
+#    dmux/feature-x/<task-slug>, and runs in its own tmux window.
+#    -t is the task: Devin's first prompt, the session's label, and the branch slug.
 dmux spawn feature-x -t "Fix the auth bug in api/ and add a regression test"
 dmux spawn feature-x -t "Update web/ to handle the new error code"
 #    -> Spawned session s_0a7ae6 ...   (ids also appear in `dmux ls`)
+#    or both steps at once:
+dmux new payment-fix --repo ~/code/api -t "Fix the refund rounding bug"
 
 # 3. Watch
 dmux ls                   # the board, once
@@ -83,9 +89,18 @@ dmux jump auth            # or name it: task text, session id, or id prefix
 # 5. Later — every <session> argument accepts task text, id, or id prefix
 dmux kill auth
 dmux resume auth -t "Pick up where you left off and run the tests"
-dmux workspace status feature-x
-dmux workspace rm feature-x --stop --delete-branches
+dmux session status auth              # what would be lost if removed
+dmux rm auth --delete-branches        # this session's worktrees + branch (merged only)
+dmux workspace rm feature-x --stop    # everything in the workspace
 ```
+
+### Sharing worktrees on purpose
+
+Sometimes two agents should work on the same branch — a reviewer alongside an
+implementer, or a helper on a sub-task. `dmux spawn <ws> --in <session>` starts
+a session in an existing session's worktrees instead of creating new ones. The
+joiner owns nothing: removing it touches no git, and the owner cannot be
+removed while joiners exist.
 
 ### Naming sessions
 
@@ -140,12 +155,15 @@ resumable.
 | Command | Notes |
 | --- | --- |
 | `dmux init [--uninstall]` | install / remove the status hook in Devin's user config |
-| `dmux workspace new <name> --repo <path>[@branch] ...` | worktree per repo; `@branch` reuses an existing branch instead of creating `dmux/<name>`; `--base <ref>` for the branch point |
+| `dmux workspace new <name> --repo <path>[@ref] ...` | records the repos; `@ref` / `--base` set where sessions branch from (default HEAD) |
+| `dmux new <name> [--repo ...] -t "task"` | `workspace new` (if needed) + `spawn` in one step |
 | `dmux workspace list` | |
 | `dmux workspace rename <name> <new-name>` | records + tmux session renamed; directory and branches keep their names |
-| `dmux workspace status <name>` (alias `diff`) | per repo: uncommitted changes, commits not in the base ref, worktree locks |
-| `dmux workspace rm <name>` | see [Safety](#safety) |
-| `dmux spawn <workspace> [-t "task"] [--permission-mode m] [--model m]` | new session; `-t` is Devin's first prompt and the session's label; warns when others already share the workspace |
+| `dmux workspace status <name>` (alias `diff`) | every session's worktrees: uncommitted changes, commits not in the base, locks |
+| `dmux session status <session>` | the same for one session |
+| `dmux workspace rm <name>` | remove every session, then the workspace; see [Safety](#safety) |
+| `dmux rm <session>` | remove one session's worktrees, window, record; same rules |
+| `dmux spawn <workspace> [-t "task"] [--branch b] [--in session] [--permission-mode m] [--model m]` | new session in its own worktrees; `--branch` overrides `dmux/<ws>/<slug>`; `--in` shares another session's worktrees |
 | `dmux ls [-w] [-v]` | status board, once; `-w` refreshes every 2s; `-v` adds evidence and last message |
 | `dmux jump [<session>]` | picker when no argument; see [Naming sessions](#naming-sessions) |
 | `dmux kill <session> \| --all \| -w <workspace> [--grace 5s]` | SIGTERM → wait → SIGKILL, close window; record kept. `--all` / `--workspace` stop many at once, concurrently |
@@ -199,14 +217,13 @@ The tool is built around a few rules that hold in code, not just in docs:
   in scripts.
 - Branches are kept by default. `--delete-branches` deletes only branches dmux
   created, only with `git branch -d` (unmerged branches are kept). dmux has no
-  code path that runs `git branch -D`. Kept branches block re-creating a
-  workspace of the same name; `dmux doctor` lists them with the `git branch -d`
-  command to run, and the `workspace new` error says the same.
+  code path that runs `git branch -D`. `dmux doctor` lists kept branches no
+  session uses, with the `git branch -d` command to run.
 - `resume` continues the *recorded* conversation (`devin -r <id>`). It never
   guesses by directory, so several sessions in one workspace stay distinct.
-- Isolation is **per workspace, not per session**: two sessions in the same
-  workspace share its files and branches. Use one workspace per task and
-  multiple sessions only for sub-tasks you know don't conflict.
+- Isolation is **per session**: every `spawn` gets its own worktrees and
+  branches. Sharing is explicit (`--in`) and visible (`↳ owner` in `dmux ls`);
+  an owner cannot be removed while sessions share its worktrees.
 - `doctor --fix` finishes interrupted operations only when the worktrees are
   clean, closes windows of exited sessions, and drops records that point at
   nothing. It never touches uncommitted work, unmerged branches, or resumable
@@ -220,9 +237,15 @@ The tool is built around a few rules that hold in code, not just in docs:
 ~/.devin-mux/
 ├── state.json                 workspace + session records (atomic writes, flock)
 ├── events/<session>.jsonl     lifecycle events from the hook and the launcher
-└── workspaces/<name>/         the worktrees, plus a generated AGENTS.md map
+└── workspaces/<ws>/<session>/ one dir per session: a worktree per repo + AGENTS.md map
 ~/.config/devin/config.json    Devin's user config (dmux adds "hooks" entries)
 ```
+
+State from dmux before 2026-09-29 (workspaces owned the worktrees) is migrated
+automatically on first read; existing sessions keep sharing their old worktrees
+until removed. A leftover `dmux/<ws>` branch from that version blocks the new
+`dmux/<ws>/<slug>` names; `spawn` and `doctor` tell you how to rename or delete
+it.
 
 Deleting `~/.devin-mux/events/` is safe (status recomputes from tmux and Devin's
 store); deleting `state.json` orphans your worktrees — use `workspace rm`.

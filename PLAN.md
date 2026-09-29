@@ -642,6 +642,35 @@ Cross-cutting:
 - [x] git adapter: `GIT_TERMINAL_PROMPT=0`, context timeouts, porcelain
       parsing (`worktree list --porcelain`, `status --porcelain`) (M1)
 
+## Model revision: sessions own the worktrees (2026-09-29)
+
+Dogfooding exposed a mismatch between the built model and the intended one:
+three sessions spawned in one workspace shared one worktree and one branch, so
+three unrelated tasks intermixed on `dmux/chi`. The user's mental model (and the
+prior art) is one agent = one worktree = one branch. Revised:
+
+- **Workspace** = logical unit (project/workstream/feature): name + repos (+
+  base ref per repo). Owns no worktrees. `workspace new` only records.
+- **Session** = one agent with its own worktree and branch per repo under
+  `<ws root>/<session id>/<repo>/`; Devin's cwd is the session dir with a
+  per-session `AGENTS.md` map. Branch: `dmux/<ws>/<task-slug>` (PR-friendly;
+  `--branch` overrides; id suffix on collision; id when no task).
+- The creation saga (plan → reserve → worktrees → map → window → ready, with
+  reverse-order rollback and `-d` on created branches) moved from workspace to
+  session spawn. The removal saga became `dmux rm <session>`; `workspace rm`
+  runs it for every session (joiners first) then drops the workspace.
+- **Explicit sharing**: `spawn --in <session>` joins another session's
+  worktrees (reviewer/helper). Joiners own nothing; an owner refuses removal
+  while joiners exist.
+- **State v2** with in-memory migration of v1 on read: the workspace's
+  worktree set is handed to its oldest session as owner, other sessions become
+  joiners (exactly what they already were), sessionless workspaces get a
+  placeholder owner so worktrees stay removable.
+- Git constraint found live: a v1 branch `dmux/<ws>` blocks `dmux/<ws>/*`
+  (refs are files). Caught at plan time with the rename/delete command.
+- `dmux new <ws> [--repo ...] -t` does workspace-create-if-needed + spawn.
+- `ls` gained a BRANCH column (`↳ owner` for joiners); Devin id moved to -v.
+
 ## v0 validation (2026-09-29)
 
 Functionally complete CLI (M1–M4). Validated before any UI work:
