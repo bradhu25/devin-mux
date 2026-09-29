@@ -21,6 +21,10 @@ type Status struct {
 	// Pending approvals in request order. Non-empty => Activity is
 	// awaiting-approval while the process is alive.
 	Pending []PendingApproval
+	// InFlight lists tool calls started but not yet completed or resolved.
+	// Non-empty means real work is running (a long test, a build), however
+	// long it has been silent.
+	InFlight []string
 	// Observations useful for display.
 	DevinSessionID  string
 	CurrentPromptID string
@@ -71,7 +75,7 @@ func Reduce(events []SessionEvent) Status {
 			// Fresh start or resume: the agent is at its input box until a
 			// prompt arrives. A new start also supersedes the previous run.
 			st.Lifecycle, st.Activity = LifecycleRunning, ActivityIdle
-			st.Pending, st.ExitCode, st.Signal = nil, nil, ""
+			st.Pending, st.InFlight, st.ExitCode, st.Signal = nil, nil, nil, ""
 
 		case PromptSubmitted:
 			if pid := str(ev.Data, "promptId"); pid != "" && pid != st.CurrentPromptID {
@@ -83,6 +87,9 @@ func Reduce(events []SessionEvent) Status {
 
 		case ToolStarted:
 			st.Lifecycle = LifecycleRunning
+			if id != "" && !completed[id] && !contains(st.InFlight, id) {
+				st.InFlight = append(st.InFlight, id)
+			}
 			if len(st.Pending) == 0 {
 				st.Activity = ActivityWorking
 			}
@@ -102,6 +109,7 @@ func Reduce(events []SessionEvent) Status {
 			if id != "" {
 				completed[id] = true
 				st.Pending = removePending(st.Pending, id)
+				st.InFlight = removeString(st.InFlight, id)
 			}
 			if len(st.Pending) == 0 {
 				st.Activity = ActivityWorking
@@ -111,6 +119,9 @@ func Reduce(events []SessionEvent) Status {
 			if id != "" {
 				completed[id] = true
 				st.Pending = removePending(st.Pending, id)
+				if o := ApprovalOutcome(str(ev.Data, "outcome")); o != OutcomeApproved {
+					st.InFlight = removeString(st.InFlight, id)
+				}
 			}
 			if alive() && len(st.Pending) == 0 {
 				switch ApprovalOutcome(str(ev.Data, "outcome")) {
@@ -124,13 +135,13 @@ func Reduce(events []SessionEvent) Status {
 		case TurnCompleted:
 			st.LastMessage = str(ev.Data, "lastMessage")
 			st.Lifecycle, st.Activity = LifecycleRunning, ActivityIdle
-			st.Pending = nil
+			st.Pending, st.InFlight = nil, nil
 
 		case SessionEnded:
-			st.Lifecycle, st.Activity, st.Pending = LifecycleExited, ActivityUnknown, nil
+			st.Lifecycle, st.Activity, st.Pending, st.InFlight = LifecycleExited, ActivityUnknown, nil, nil
 
 		case ProcessExited:
-			st.Lifecycle, st.Activity, st.Pending = LifecycleExited, ActivityUnknown, nil
+			st.Lifecycle, st.Activity, st.Pending, st.InFlight = LifecycleExited, ActivityUnknown, nil, nil
 			if code, ok := num(ev.Data, "exitCode"); ok {
 				c := code
 				st.ExitCode = &c
@@ -188,4 +199,26 @@ func num(d map[string]any, k string) (int, bool) {
 		return int(v), true
 	}
 	return 0, false
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func removeString(list []string, s string) []string {
+	out := list[:0]
+	for _, x := range list {
+		if x != s {
+			out = append(out, x)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

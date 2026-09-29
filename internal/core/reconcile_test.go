@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -180,6 +181,72 @@ func TestReconcile_AliveNoEvents(t *testing.T) {
 	v, _ := r.Reconcile(context.Background(), s, ws)
 	if v.Status.Lifecycle != LifecycleStarting || v.Status.Activity != ActivityUnknown || Display(v.Status, v.Liveness) != "starting" {
 		t.Fatalf("%+v", v.Status)
+	}
+}
+
+// Ctrl-C mid-turn fires no hook and leaves no store marker. When the agent
+// is "thinking" (no tool in flight) and nothing has happened for StaleAfter,
+// the honest status is unknown, never working. A tool still running keeps
+// working no matter how long it takes.
+func TestReconcile_StaleThinkingBecomesUnknown(t *testing.T) {
+	thinking := []SessionEvent{
+		ev(0, SessionStarted, nil),
+		ev(1, PromptSubmitted, map[string]any{"promptId": "p1"}),
+		ev(2, ToolStarted, tool("t1")),
+		ev(3, ToolCompleted, tool("t1")), // then the user hit Ctrl-C while the model was thinking
+	}
+	r, s, ws := newReconciler(thinking, aliveWin(), nil)
+	r.StaleAfter = 3 * time.Minute
+
+	r.Now = func() time.Time { return t0.Add(3*time.Second + time.Minute) } // 1 min: still plausibly thinking
+	v, _ := r.Reconcile(context.Background(), s, ws)
+	if v.Status.Activity != ActivityWorking {
+		t.Fatalf("recent thinking should be working: %+v", v.Status)
+	}
+
+	r.Now = func() time.Time { return t0.Add(3*time.Second + 10*time.Minute) }
+	v, _ = r.Reconcile(context.Background(), s, ws)
+	if v.Status.Activity != ActivityUnknown || Display(v.Status, v.Liveness) != "unknown" {
+		t.Fatalf("stale thinking should be unknown: %+v", v.Status)
+	}
+	if len(v.Evidence) == 0 || !strings.Contains(v.Evidence[0], "interrupted") {
+		t.Fatalf("evidence should explain: %v", v.Evidence)
+	}
+
+	// A long-running tool is real work: stays working.
+	running := append(append([]SessionEvent(nil), thinking...), ev(4, ToolStarted, tool("t2")))
+	r2, s2, ws2 := newReconciler(running, aliveWin(), nil)
+	r2.StaleAfter, r2.Now = 3*time.Minute, func() time.Time { return t0.Add(30 * time.Minute) }
+	v, _ = r2.Reconcile(context.Background(), s2, ws2)
+	if v.Status.Activity != ActivityWorking {
+		t.Fatalf("in-flight tool must stay working: %+v", v.Status)
+	}
+
+	// Idle and awaiting-approval are unaffected by staleness.
+	idle := []SessionEvent{ev(0, SessionStarted, nil), ev(1, TurnCompleted, nil)}
+	r3, s3, ws3 := newReconciler(idle, aliveWin(), nil)
+	r3.StaleAfter, r3.Now = 3*time.Minute, func() time.Time { return t0.Add(30 * time.Minute) }
+	if v, _ = r3.Reconcile(context.Background(), s3, ws3); v.Status.Activity != ActivityIdle {
+		t.Fatalf("idle must not go stale: %+v", v.Status)
+	}
+}
+
+func TestReduce_TracksInFlightTools(t *testing.T) {
+	evs := []SessionEvent{ev(0, SessionStarted, nil), ev(1, ToolStarted, tool("t1")), ev(2, ToolStarted, tool("t2"))}
+	if st := Reduce(evs); len(st.InFlight) != 2 {
+		t.Fatalf("in flight: %v", st.InFlight)
+	}
+	evs = append(evs, ev(3, ToolCompleted, tool("t1")))
+	if st := Reduce(evs); len(st.InFlight) != 1 || st.InFlight[0] != "t2" {
+		t.Fatalf("in flight after completion: %v", st.InFlight)
+	}
+	evs = append(evs, ev(4, ApprovalResolved, map[string]any{"toolUseId": "t2", "outcome": "denied"}))
+	if st := Reduce(evs); len(st.InFlight) != 0 {
+		t.Fatalf("denied tool is not in flight: %v", st.InFlight)
+	}
+	evs = append(evs, ev(5, ToolStarted, tool("t3")), ev(6, TurnCompleted, nil))
+	if st := Reduce(evs); len(st.InFlight) != 0 {
+		t.Fatalf("turn end clears in flight: %v", st.InFlight)
 	}
 }
 

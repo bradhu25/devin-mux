@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 )
@@ -44,7 +45,15 @@ type Reconciler struct {
 	Tmux   Tmux
 	Devin  Devin // may be nil: approval resolution via Devin's store is skipped
 	Now    func() time.Time
+	// StaleAfter bounds how long a "working" session with no tool in flight
+	// may stay silent before it is reported as unknown. Ctrl-C mid-turn
+	// fires no hook and leaves no store marker, so silence while "thinking"
+	// is ambiguous; a running tool is not. Default 3m.
+	StaleAfter time.Duration
 }
+
+// DefaultStaleAfter is the default for Reconciler.StaleAfter.
+const DefaultStaleAfter = 3 * time.Minute
 
 // Snapshot reconciles every recorded session. It never writes state.
 func (r *Reconciler) Snapshot(ctx context.Context) (*Snapshot, error) {
@@ -158,6 +167,14 @@ func (r *Reconciler) reconcileSession(ctx context.Context, s Session, ws Workspa
 		if v.Status.Lifecycle == LifecycleStarting {
 			v.Status.Activity = ActivityUnknown // no events yet; never guess
 		}
+		// Silence while thinking is ambiguous (Ctrl-C leaves no trace);
+		// silence while a tool runs is not.
+		if v.Status.Activity == ActivityWorking && len(v.Status.InFlight) == 0 && !v.Status.LastEventAt.IsZero() {
+			if silent := r.now().Sub(v.Status.LastEventAt); silent > r.staleAfter() {
+				v.Status.Activity = ActivityUnknown
+				v.Evidence = append(v.Evidence, fmt.Sprintf("no events for %s with no tool running; the turn may have been interrupted (Ctrl-C) — check the pane", silent.Truncate(time.Second)))
+			}
+		}
 	}
 	return v
 }
@@ -182,6 +199,13 @@ func Display(st Status, _ Liveness) string {
 		return "awaiting-approval"
 	}
 	return "unknown"
+}
+
+func (r *Reconciler) staleAfter() time.Duration {
+	if r.StaleAfter > 0 {
+		return r.StaleAfter
+	}
+	return DefaultStaleAfter
 }
 
 func (r *Reconciler) now() time.Time {

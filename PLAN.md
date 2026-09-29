@@ -378,6 +378,10 @@ Rules:
   Devin is alive (could be the wrapper/shell) — check the wrapper's child.
 - **Never infer idle from silence.** Long inference or long-running tests
   produce no events while working. Unknown is honest; false idle is not.
+  Implemented (dogfooding 2026-09-29, Ctrl-C mid-turn showed "working"
+  forever): the reducer tracks in-flight tool calls; the reconciler turns
+  *working with nothing in flight* into **unknown** after `StaleAfter` (3m)
+  with evidence. A running tool never goes stale.
 
 ### Persistence (design constraint)
 
