@@ -184,6 +184,60 @@ func TestReconcile_AliveNoEvents(t *testing.T) {
 	}
 }
 
+// Approving an exec permission fires no hook and writes no store row until
+// the command finishes. The process tree does show it: a command started
+// under Devin after the request means the request was approved.
+func TestReconcile_ApprovedExecSeenInProcessTree(t *testing.T) {
+	evs := []SessionEvent{
+		ev(0, SessionStarted, nil),
+		ev(1, PromptSubmitted, map[string]any{"promptId": "p1"}),
+		ev(2, ToolStarted, map[string]any{"toolUseId": "t1", "toolName": "exec"}),
+		ev(3, ApprovalRequested, map[string]any{"toolUseId": "t1", "toolName": "exec"}),
+	}
+	requested := t0.Add(3 * time.Second)
+	win := aliveWin()
+	win.PanePID = 500
+	devinTree := []ProcInfo{{PID: 501, PPID: 500, Comm: "devin", Started: t0.Add(-time.Hour)}, {PID: 502, PPID: 501, Comm: "devin", Started: t0.Add(-time.Hour)}}
+
+	// Only Devin itself under the pane: still awaiting.
+	r, s, ws := newReconciler(evs, win, nil)
+	r.Proc = &fakeProc{alive: map[int]bool{500: true}, descendants: devinTree}
+	r.Now = func() time.Time { return requested.Add(30 * time.Second) }
+	v, _ := r.Reconcile(context.Background(), s, ws)
+	if v.Status.Activity != ActivityAwaitingApproval {
+		t.Fatalf("no command running: should still await: %+v", v.Status)
+	}
+
+	// A command that started BEFORE the request (backgrounded earlier) proves nothing.
+	old := append(append([]ProcInfo(nil), devinTree...), ProcInfo{PID: 600, PPID: 502, Comm: "node", Started: requested.Add(-5 * time.Minute)})
+	r.Proc = &fakeProc{alive: map[int]bool{500: true}, descendants: old}
+	v, _ = r.Reconcile(context.Background(), s, ws)
+	if v.Status.Activity != ActivityAwaitingApproval {
+		t.Fatalf("pre-existing process must not count as approval: %+v", v.Status)
+	}
+
+	// A command started after the request: approved, running => working.
+	running := append(append([]ProcInfo(nil), old...), ProcInfo{PID: 601, PPID: 502, Comm: "sh", Started: requested.Add(4 * time.Second)})
+	r.Proc = &fakeProc{alive: map[int]bool{500: true}, descendants: running}
+	v, _ = r.Reconcile(context.Background(), s, ws)
+	if v.Status.Activity != ActivityWorking || len(v.Status.Pending) != 0 || len(v.Status.InFlight) != 1 {
+		t.Fatalf("approved exec should be working with the tool in flight: %+v", v.Status)
+	}
+	if len(v.Evidence) == 0 || !strings.Contains(v.Evidence[0], "process tree") {
+		t.Fatalf("evidence: %v", v.Evidence)
+	}
+
+	// Non-exec pending tools are not inferred from processes.
+	editEvs := append(append([]SessionEvent(nil), evs[:2]...),
+		ev(2, ToolStarted, map[string]any{"toolUseId": "t2", "toolName": "write"}),
+		ev(3, ApprovalRequested, map[string]any{"toolUseId": "t2", "toolName": "write"}))
+	r2, s2, ws2 := newReconciler(editEvs, win, nil)
+	r2.Proc, r2.Now = r.Proc, r.Now
+	if v, _ = r2.Reconcile(context.Background(), s2, ws2); v.Status.Activity != ActivityAwaitingApproval {
+		t.Fatalf("write approval must not be inferred from the process tree: %+v", v.Status)
+	}
+}
+
 // Ctrl-C mid-turn fires no hook and leaves no store marker. When the agent
 // is "thinking" (no tool in flight) and nothing has happened for StaleAfter,
 // the status becomes "idle?" (probably idle), never a confident working or

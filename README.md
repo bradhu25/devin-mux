@@ -113,6 +113,11 @@ differs from the prompt.
 
 `dmux ls -v` adds the agent's last message and the evidence behind each status.
 
+Approving an `exec` permission is also silent until the command finishes, so
+dmux checks the process tree: a command running under Devin that started after
+the request means it was approved, and the session reads `working` within a
+second or two.
+
 What dmux cannot see: interrupting a turn with `Ctrl-C` and cancelling a
 permission prompt with `Esc` fire no Devin hook. Cancelled/denied *tool calls*
 are recovered from Devin's own store within a second; a cancelled *turn* with

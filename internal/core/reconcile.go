@@ -44,6 +44,7 @@ type Reconciler struct {
 	Events EventLog
 	Tmux   Tmux
 	Devin  Devin // may be nil: approval resolution via Devin's store is skipped
+	Proc   Proc  // may be nil: approval inference from the process tree is skipped
 	Now    func() time.Time
 	// StaleAfter bounds how long a "working" session with no tool in flight
 	// may stay silent before it is reported as probably idle. Ctrl-C
@@ -152,6 +153,24 @@ func (r *Reconciler) reconcileSession(ctx context.Context, s Session, ws Workspa
 		}
 	}
 
+	// 3b. Process tree. Approving an exec prompt fires no hook and writes
+	//     no store row until the command ends, so a long command would read
+	//     as awaiting-approval for its whole run. A command started under
+	//     the pane's Devin after the request is proof of approval.
+	if v.Liveness == LivenessAlive && len(v.Status.Pending) > 0 && r.Proc != nil {
+		if resolved := r.approvalsSeenInProcessTree(w.PanePID, v.Status.Pending); len(resolved) > 0 {
+			now := r.now()
+			for _, id := range resolved {
+				events = append(events, SessionEvent{
+					EventID: NewEventID(), SessionID: s.ID, Type: ApprovalResolved, Timestamp: now,
+					Data: map[string]any{"toolUseId": id, "outcome": string(OutcomeApproved), "source": "process-tree"},
+				})
+				v.Evidence = append(v.Evidence, "approval "+id+" approved (process tree: command running)")
+			}
+			v.Status = Reduce(events)
+		}
+	}
+
 	// 4. Precedence: liveness overrides stale event-derived state.
 	switch v.Liveness {
 	case LivenessMissing, LivenessDead:
@@ -218,4 +237,32 @@ func (r *Reconciler) now() time.Time {
 		return r.Now()
 	}
 	return time.Now().UTC()
+}
+
+// approvalsSeenInProcessTree returns pending exec approvals for which a
+// non-Devin process exists under panePID that started after the request.
+// Processes that predate the request (a backgrounded server from an earlier
+// command) prove nothing and are ignored.
+func (r *Reconciler) approvalsSeenInProcessTree(panePID int, pending []PendingApproval) []string {
+	procs, err := r.Proc.Descendants(panePID)
+	if err != nil || len(procs) == 0 {
+		return nil
+	}
+	var out []string
+	for _, p := range pending {
+		if p.ToolName != "exec" {
+			continue
+		}
+		for _, pr := range procs {
+			if pr.Comm == "dmux" || pr.Comm == "devin" {
+				continue
+			}
+			// One second of slack: process start times are second-granular.
+			if pr.Started.After(p.RequestedAt.Add(-time.Second)) {
+				out = append(out, p.ToolUseID)
+				break
+			}
+		}
+	}
+	return out
 }

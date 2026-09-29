@@ -6,6 +6,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/bradhu25/devin-mux/internal/core"
 )
 
 // startGroup starts `sh -c 'sleep 30'` as its own process group leader with a
@@ -86,4 +88,63 @@ func itoa(i int) string {
 		i /= 10
 	}
 	return string(b)
+}
+
+func TestDescendantsFromPS(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	ps := `
+    1     0 18-08:15:19 /sbin/launchd
+65917 53423       15:12 /Users/bradleyhu/devin-mux/bin/dmux
+65921 65917       15:12 devin
+65922 65921       15:10 /Users/bradleyhu/.local/bin/devin
+70001 65922       00:03 /bin/sh
+70002 70001       00:03 /usr/local/go/bin/go
+80164 77856 01-09:32:55 devin
+  garbage line
+`
+	got := descendantsFromPS(ps, 65917, now)
+	if len(got) != 4 {
+		t.Fatalf("want dmux's 4 descendants, got %d: %+v", len(got), got)
+	}
+	byPID := map[int]core.ProcInfo{}
+	for _, p := range got {
+		byPID[p.PID] = p
+	}
+	if byPID[65922].Comm != "devin" || byPID[70001].Comm != "sh" || byPID[70002].Comm != "go" {
+		t.Fatalf("comm parsing: %+v", byPID)
+	}
+	if want := now.Add(-3 * time.Second); !byPID[70002].Started.Equal(want) {
+		t.Fatalf("started: %v want %v", byPID[70002].Started, want)
+	}
+	if want := now.Add(-(15*time.Minute + 12*time.Second)); !byPID[65921].Started.Equal(want) {
+		t.Fatalf("started mm:ss: %v want %v", byPID[65921].Started, want)
+	}
+	if _, foreign := byPID[80164]; foreign {
+		t.Fatal("unrelated process must not be included")
+	}
+}
+
+func TestParseEtime(t *testing.T) {
+	for in, want := range map[string]time.Duration{"00:03": 3 * time.Second, "15:12": 15*time.Minute + 12*time.Second, "01:09:32": time.Hour + 9*time.Minute + 32*time.Second, "18-08:15:19": 18*24*time.Hour + 8*time.Hour + 15*time.Minute + 19*time.Second} {
+		if got := parseEtime(in); got != want {
+			t.Errorf("parseEtime(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestDescendants_Real(t *testing.T) {
+	cmd := startGroup(t) // sh -c 'sleep 30 & wait' => sh with a sleep child
+	got, err := Adapter{}.Descendants(cmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range got {
+		if p.Comm == "sleep" && time.Since(p.Started) < 10*time.Second {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a recent sleep child: %+v", got)
+	}
 }

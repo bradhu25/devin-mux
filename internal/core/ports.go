@@ -1,6 +1,9 @@
 package core
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Worktree is one entry from `git worktree list --porcelain`.
 type Worktree struct {
@@ -146,8 +149,16 @@ type Devin interface {
 	ToolCallOutcomes(ctx context.Context, devinSessionID string, toolUseIDs []string) ([]ToolCallOutcome, error)
 }
 
-// Proc is the port for OS process control. dmux only ever signals pids it
-// obtained from tagged tmux panes it created.
+// ProcInfo describes one process in a tree.
+type ProcInfo struct {
+	PID     int
+	PPID    int
+	Comm    string    // executable name (basename)
+	Started time.Time // approximate start time (second granularity)
+}
+
+// Proc is the port for OS process control and inspection. dmux only ever
+// signals pids it obtained from tagged tmux panes it created.
 type Proc interface {
 	// Terminate sends SIGTERM to the process group led by pid.
 	Terminate(pid int) error
@@ -155,6 +166,9 @@ type Proc interface {
 	Kill(pid int) error
 	// Alive reports whether pid still exists.
 	Alive(pid int) bool
+	// Descendants returns every process below pid (children, grandchildren,
+	// ...). Used to see whether Devin is running a command right now.
+	Descendants(pid int) ([]ProcInfo, error)
 }
 
 // EventLog is the port for reading a session's normalized events.

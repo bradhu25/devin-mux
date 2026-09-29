@@ -71,6 +71,7 @@ func (a *app) init() error {
 			Events: state.EventLog{},
 			Tmux:   a.tmux,
 			Devin:  a.devin,
+			Proc:   procadapter.Adapter{},
 		}
 	})
 	return a.err

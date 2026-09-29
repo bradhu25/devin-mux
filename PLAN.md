@@ -351,6 +351,14 @@ fire nothing, not even `Stop`). approval_resolved is produced by the
    (outcome unknown → idle). Otherwise remain awaiting-approval, but mark
    evidence as stale after a threshold and display **unknown**.
 
+**Third evidence source — process tree** (dogfooding 2026-09-29): approving an
+`exec` permission fires no hook and writes no store row until the command
+*finishes*, so a long command read as awaiting-approval for its whole run.
+A non-Devin process under the pane that started *after* the request is proof
+of approval; the reconciler injects `approval_resolved{approved, source:
+process-tree}`. Pre-existing processes (backgrounded servers) are ignored;
+non-exec tools complete instantly and need no inference.
+
 **Reducer (FSM)**: session_started → running + **idle** (at the input box until
 a prompt arrives; also clears pending/exit info from a previous run — found in
 dogfooding: resume without `-t` showed "working"); prompt_submitted/tool_started

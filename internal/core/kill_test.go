@@ -11,13 +11,16 @@ import (
 // fakeProc models a process group: Terminate makes it exit after a delay
 // (or never, if stubborn), Kill always ends it.
 type fakeProc struct {
-	mu         sync.Mutex
-	alive      map[int]bool
-	stubborn   bool // ignore SIGTERM
-	terminated []int
-	killed     []int
-	onExit     func(pid int) // e.g. append process_exited to the fake log
+	mu          sync.Mutex
+	alive       map[int]bool
+	stubborn    bool // ignore SIGTERM
+	terminated  []int
+	killed      []int
+	onExit      func(pid int) // e.g. append process_exited to the fake log
+	descendants []ProcInfo
 }
+
+func (p *fakeProc) Descendants(int) ([]ProcInfo, error) { return p.descendants, nil }
 
 func (p *fakeProc) Terminate(pid int) error {
 	p.mu.Lock()
