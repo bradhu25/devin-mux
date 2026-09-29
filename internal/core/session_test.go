@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ func (f *fakeTmux) SpawnWindow(_ context.Context, o SpawnWindowOpts) (TmuxTarget
 	}
 	f.spawned = append(f.spawned, o)
 	f.nextWindow++
-	return TmuxTarget{SessionName: o.SessionName, SessionID: "$1", WindowID: "@" + string(rune('0'+f.nextWindow))}, nil
+	return TmuxTarget{SessionName: o.SessionName, SessionID: "$1", WindowID: fmt.Sprintf("@%d", f.nextWindow)}, nil
 }
 func (f *fakeTmux) ListWindows(context.Context) ([]TmuxWindow, error) { return nil, nil }
 func (f *fakeTmux) KillWindow(_ context.Context, id string) error {
