@@ -128,6 +128,7 @@ resumable.
 | `dmux init [--uninstall]` | install / remove the status hook in Devin's user config |
 | `dmux workspace new <name> --repo <path>[@branch] ...` | worktree per repo; `@branch` reuses an existing branch instead of creating `dmux/<name>`; `--base <ref>` for the branch point |
 | `dmux workspace list` | |
+| `dmux workspace rename <name> <new-name>` | records + tmux session renamed; directory and branches keep their names |
 | `dmux workspace status <name>` (alias `diff`) | per repo: uncommitted changes, commits not in the base ref, worktree locks |
 | `dmux workspace rm <name>` | see [Safety](#safety) |
 | `dmux spawn <workspace> [-t "task"] [--permission-mode m] [--model m]` | new session; `-t` is Devin's first prompt and the session's label; warns when others already share the workspace |

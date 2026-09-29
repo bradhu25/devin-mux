@@ -20,7 +20,7 @@ func newWorkspaceCmd(a *app) *cobra.Command {
 		Aliases: []string{"ws"},
 		Short:   "Create and manage workspaces (sets of git worktrees)",
 	}
-	cmd.AddCommand(newWorkspaceNewCmd(a), newWorkspaceListCmd(a), newWorkspaceStatusCmd(a), newWorkspaceRmCmd(a))
+	cmd.AddCommand(newWorkspaceNewCmd(a), newWorkspaceListCmd(a), newWorkspaceStatusCmd(a), newWorkspaceRmCmd(a), newWorkspaceRenameCmd(a))
 	return cmd
 }
 
@@ -218,4 +218,41 @@ func shortRef(ref string) string {
 		return ref[:12]
 	}
 	return ref
+}
+
+func newWorkspaceRenameCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "rename <workspace> <new-name>",
+		Short: "Rename a workspace (records and tmux session; directory and branches keep their names)",
+		Long: `Change a workspace's name. Sessions, worktrees, and branches are unaffected
+because they reference the workspace by id. The tmux session is renamed to
+dmux-<new-name> and the workspace's AGENTS.md map is regenerated. The directory
+under ~/.devin-mux/workspaces/ and any dmux/<old-name> branches keep their
+original names.`,
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeWorkspaces(a),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := a.init(); err != nil {
+				return err
+			}
+			res, err := a.workspaces.Rename(cmd.Context(), a.tmux, args[0], args[1])
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if res.OldName == res.Workspace.Name {
+				fmt.Fprintf(out, "Workspace is already named %s.\n", res.Workspace.Name)
+				return nil
+			}
+			fmt.Fprintf(out, "Renamed workspace %s -> %s (%s)\n", res.OldName, res.Workspace.Name, res.Workspace.ID)
+			if res.TmuxRenamed {
+				fmt.Fprintf(out, "  tmux session renamed to dmux-%s\n", res.Workspace.Name)
+			}
+			fmt.Fprintf(out, "  directory unchanged: %s\n", res.Workspace.Root)
+			for _, w := range res.Warnings {
+				fmt.Fprintf(out, "  warning: %s\n", w)
+			}
+			return nil
+		},
+	}
 }

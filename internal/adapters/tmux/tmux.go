@@ -230,6 +230,14 @@ func (a *Adapter) KillWindow(ctx context.Context, windowID string) error {
 	return err
 }
 
+func (a *Adapter) RenameSession(ctx context.Context, sessionID, name string) error {
+	if !strings.HasPrefix(sessionID, "$") {
+		return fmt.Errorf("RenameSession: %q is not a session id", sessionID)
+	}
+	_, err := a.run(ctx, "rename-session", "-t", sessionID, SanitizeSessionName(name))
+	return err
+}
+
 func (a *Adapter) InsideTmux() bool {
 	lookup := a.LookupEnv
 	if lookup == nil {

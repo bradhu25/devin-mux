@@ -596,7 +596,8 @@ Commands:
 - [x] `dmux workspace list` (M1)
 - [x] `dmux workspace rm` — saga: refuse if running unless `--stop`, refuse
       if dirty unless `--discard`, locked never, keep branches unless
-      `--delete-branches` (M4). `rename` deferred to M5 polish
+      `--delete-branches` (M4)
+- [x] `dmux workspace rename <name> <new>` — display name + tmux session; dir/branches unchanged (2026-09-29)
 - [x] `dmux workspace status|diff <name>` — per-repo dirty / commits ahead of
       base / locked (M4)
 - [x] `dmux doctor [--fix]` — stuck sagas, unregistered worktrees, orphan dirs,

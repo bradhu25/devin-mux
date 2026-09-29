@@ -100,6 +100,9 @@ type Tmux interface {
 	ListWindows(ctx context.Context) ([]TmuxWindow, error)
 	// KillWindow kills a window by @N id.
 	KillWindow(ctx context.Context, windowID string) error
+	// RenameSession renames a tmux session by $N id (display only; ids are
+	// unaffected).
+	RenameSession(ctx context.Context, sessionID, name string) error
 	// InsideTmux reports whether the current process runs inside a tmux
 	// client ($TMUX set).
 	InsideTmux() bool
