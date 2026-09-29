@@ -159,6 +159,13 @@ dmux completion fish > ~/.config/fish/completions/dmux.fish
 
 Regenerate the file after upgrading dmux.
 
+**Warp users:** Warp's input box bypasses shell completion entirely (its own
+engine only knows commands in Warp's spec database — see
+[warpdotdev/Warp#1811](https://github.com/warpdotdev/Warp/issues/1811)), so
+`<TAB>` won't show dmux's suggestions there. It works in Terminal.app, iTerm,
+inside any tmux pane (including your dmux sessions), or in a `bash`/`zsh`
+subshell within Warp.
+
 ## Safety
 
 The tool is built around a few rules that hold in code, not just in docs:
