@@ -148,9 +148,15 @@ status|rm`) and **session ids** with their task — live sessions for `jump` and
 Enable it once for your shell:
 
 ```bash
-# bash (macOS ships bash 3.2, where `source <(...)` fails silently — use a file)
+# bash on macOS: the script needs the bash-completion package, which macOS
+# lacks (error: `_get_comp_words_by_ref: command not found`). Install it and
+# load it BEFORE the dmux script. Use a file, not `source <(...)`, which fails
+# silently on the stock bash 3.2.
+brew install bash-completion
+echo '[[ -r /opt/homebrew/etc/profile.d/bash_completion.sh ]] && . /opt/homebrew/etc/profile.d/bash_completion.sh' >> ~/.bash_profile
 dmux completion bash > ~/.dmux-completion.bash
 echo 'source ~/.dmux-completion.bash' >> ~/.bash_profile
+# bash on Linux: bash-completion is usually preinstalled; just the last two lines
 # zsh
 dmux completion zsh > ~/.dmux-completion.zsh
 echo 'source ~/.dmux-completion.zsh' >> ~/.zshrc
