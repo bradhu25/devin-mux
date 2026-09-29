@@ -64,8 +64,14 @@ func (m *WorkspaceManager) Inspect(ctx context.Context, query string) (*Workspac
 }
 
 func (m *WorkspaceManager) inspectRepo(ctx context.Context, repo WorkspaceRepo) RepoStatus {
+	return inspectRepo(ctx, m.Git, repo)
+}
+
+// inspectRepo is the shared read-only inspection used by status, rm, and
+// doctor.
+func inspectRepo(ctx context.Context, g Git, repo WorkspaceRepo) RepoStatus {
 	rs := RepoStatus{Repo: repo}
-	wts, err := m.Git.WorktreeList(ctx, repo.SourcePath)
+	wts, err := g.WorktreeList(ctx, repo.SourcePath)
 	if err != nil {
 		rs.Err = fmt.Errorf("list worktrees of %s: %w", repo.SourcePath, err)
 		return rs
@@ -81,12 +87,12 @@ func (m *WorkspaceManager) inspectRepo(ctx context.Context, repo WorkspaceRepo) 
 		rs.Missing = true
 		return rs
 	}
-	if rs.Dirty, err = m.Git.StatusPorcelain(ctx, repo.WorktreePath); err != nil {
+	if rs.Dirty, err = g.StatusPorcelain(ctx, repo.WorktreePath); err != nil {
 		rs.Err = err
 		return rs
 	}
 	if repo.BaseRef != "" {
-		if rs.CommitsAhead, err = m.Git.CommitsAhead(ctx, repo.WorktreePath, repo.BaseRef); err != nil {
+		if rs.CommitsAhead, err = g.CommitsAhead(ctx, repo.WorktreePath, repo.BaseRef); err != nil {
 			rs.Err = fmt.Errorf("compare with base %s: %w", repo.BaseRef, err)
 		}
 	}
