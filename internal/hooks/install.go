@@ -159,7 +159,7 @@ func marshalPreservingOrder(original []byte, root map[string]json.RawMessage) ([
 			seen[k] = true
 		}
 	}
-	if !seen["hooks"] {
+	if _, ok := root["hooks"]; ok && !seen["hooks"] {
 		write("hooks")
 	}
 	b.WriteString("\n}\n")
@@ -203,6 +203,75 @@ func keyOrder(data []byte) []string {
 	}
 }
 
+// Remove returns config with every dmux hook entry removed (any binary
+// path), preserving everything else. Empty event arrays are dropped, and the
+// "hooks" key itself is dropped when nothing remains. Removed reports how
+// many entries were taken out.
+func Remove(config []byte) ([]byte, int, error) {
+	root := map[string]json.RawMessage{}
+	if len(strings.TrimSpace(string(config))) > 0 {
+		if err := json.Unmarshal(config, &root); err != nil {
+			return nil, 0, fmt.Errorf("config is not a JSON object: %w", err)
+		}
+	}
+	raw, ok := root["hooks"]
+	if !ok || len(raw) == 0 || string(raw) == "null" {
+		return config, 0, nil
+	}
+	hooks := map[string][]json.RawMessage{}
+	if err := json.Unmarshal(raw, &hooks); err != nil {
+		return nil, 0, fmt.Errorf(`"hooks" is not an object of event -> array: %w`, err)
+	}
+	removed := 0
+	for event, entries := range hooks {
+		kept := entries[:0]
+		for _, e := range entries {
+			if _, isDmux := dmuxHookCommand(e); isDmux {
+				removed++
+				continue
+			}
+			kept = append(kept, e)
+		}
+		if len(kept) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = kept
+		}
+	}
+	if removed == 0 {
+		return config, 0, nil
+	}
+	if len(hooks) == 0 {
+		delete(root, "hooks")
+	} else {
+		hooksRaw, err := json.Marshal(hooks)
+		if err != nil {
+			return nil, 0, err
+		}
+		root["hooks"] = hooksRaw
+	}
+	out, err := marshalPreservingOrder(config, root)
+	return out, removed, err
+}
+
+// Uninstall removes dmux hooks from the config at path (backup + atomic
+// replace). Returns how many entries were removed and the backup path.
+func Uninstall(path string) (int, string, error) {
+	original, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, "", nil
+	}
+	if err != nil {
+		return 0, "", err
+	}
+	out, removed, err := Remove(original)
+	if err != nil || removed == 0 {
+		return removed, "", err
+	}
+	backup, err := writeWithBackup(path, original, out)
+	return removed, backup, err
+}
+
 // Install merges dmux hooks into the config at path, writing a timestamped
 // backup first and replacing the file atomically. Returns the result and
 // the backup path ("" if nothing changed).
@@ -218,37 +287,40 @@ func Install(path, dmuxBin string) (MergeResult, string, error) {
 	if !res.Changed() {
 		return res, "", nil
 	}
+	backup, err := writeWithBackup(path, original, merged)
+	return res, backup, err
+}
+
+// writeWithBackup writes a timestamped backup of original (if any) next to
+// path, then replaces path atomically with content at mode 0600.
+func writeWithBackup(path string, original, content []byte) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return res, "", err
+		return "", err
 	}
 	backup := ""
 	if len(original) > 0 {
 		backup = path + ".bak-" + time.Now().UTC().Format("20060102-150405")
 		if err := os.WriteFile(backup, original, 0o600); err != nil {
-			return res, "", fmt.Errorf("write backup: %w", err)
+			return "", fmt.Errorf("write backup: %w", err)
 		}
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".config.json.*.tmp")
 	if err != nil {
-		return res, backup, err
+		return backup, err
 	}
 	tmpName := tmp.Name()
-	if _, err := tmp.Write(merged); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return res, backup, err
+	cleanup := func(err error) (string, error) { _ = tmp.Close(); _ = os.Remove(tmpName); return backup, err }
+	if _, err := tmp.Write(content); err != nil {
+		return cleanup(err)
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return res, backup, err
+		return cleanup(err)
 	}
 	if err := os.Chmod(tmpName, 0o600); err != nil {
-		_ = os.Remove(tmpName)
-		return res, backup, err
+		return cleanup(err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return res, backup, err
+		return cleanup(err)
 	}
-	return res, backup, nil
+	return backup, nil
 }

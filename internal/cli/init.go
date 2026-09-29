@@ -12,7 +12,10 @@ import (
 )
 
 func newInitCmd(a *app) *cobra.Command {
-	var configPath string
+	var (
+		configPath string
+		uninstall  bool
+	)
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Install dmux's Devin hooks so session status can be observed",
@@ -33,6 +36,18 @@ before any change. Safe to run repeatedly (also after moving the dmux binary).`,
 					return err
 				}
 				path = p
+			}
+			if uninstall {
+				n, backup, err := hooks.Uninstall(path)
+				if err != nil {
+					return fmt.Errorf("remove hooks from %s: %w", path, err)
+				}
+				if n == 0 {
+					fmt.Fprintf(cmd.OutOrStdout(), "No dmux hooks found in %s.\n", path)
+					return nil
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Removed %d dmux hook entr%s from %s\n  backup: %s\n  state in %s was left untouched\n", n, plural(n, "y", "ies"), path, backup, a.store.Dir())
+				return nil
 			}
 			res, backup, err := hooks.Install(path, a.sessions.DmuxBin)
 			if err != nil {
@@ -62,5 +77,13 @@ before any change. Safe to run repeatedly (also after moving the dmux binary).`,
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "Devin config file to modify (default: ~/.config/devin/config.json)")
+	cmd.Flags().BoolVar(&uninstall, "uninstall", false, "remove dmux's hooks from the Devin config instead of installing them")
 	return cmd
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }

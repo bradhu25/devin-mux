@@ -145,6 +145,63 @@ func TestMerge_EmptyAndInvalid(t *testing.T) {
 	}
 }
 
+func TestRemove_RoundTripRestoresOriginal(t *testing.T) {
+	installed, _, _ := Merge([]byte(userConfig), "/usr/local/bin/dmux")
+	out, removed, err := Remove(installed)
+	if err != nil || removed != len(Events) {
+		t.Fatalf("%v removed=%d", err, removed)
+	}
+	if !reflect.DeepEqual(parse(t, out), parse(t, []byte(userConfig))) {
+		t.Fatalf("remove should restore the original document:\n%s", out)
+	}
+	if _, ok := parse(t, out)["hooks"]; ok {
+		t.Fatal("empty hooks key should be dropped")
+	}
+	// Nothing to remove: input returned unchanged.
+	if again, n, _ := Remove(out); n != 0 || string(again) != string(out) {
+		t.Fatal("second remove must be a no-op")
+	}
+}
+
+func TestRemove_KeepsForeignHooks(t *testing.T) {
+	cfg := `{"hooks":{"PreToolUse":[{"matcher":"exec","hooks":[{"type":"command","command":"./audit.sh"}]}]},"x":1}`
+	installed, _, _ := Merge([]byte(cfg), "/b/dmux")
+	out, removed, err := Remove(installed)
+	if err != nil || removed != len(Events) {
+		t.Fatalf("%v %d", err, removed)
+	}
+	got := parse(t, out)
+	pre := got["hooks"].(map[string]any)["PreToolUse"].([]any)
+	if len(pre) != 1 || len(got["hooks"].(map[string]any)) != 1 || got["x"] != float64(1) {
+		t.Fatalf("foreign hook must survive alone:\n%s", out)
+	}
+}
+
+func TestUninstall(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(userConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Install(path, "/b/dmux"); err != nil {
+		t.Fatal(err)
+	}
+	n, backup, err := Uninstall(path)
+	if err != nil || n != len(Events) || backup == "" {
+		t.Fatalf("%v n=%d backup=%q", err, n, backup)
+	}
+	after, _ := os.ReadFile(path)
+	if !reflect.DeepEqual(parse(t, after), parse(t, []byte(userConfig))) {
+		t.Fatalf("config not restored:\n%s", after)
+	}
+	if n, backup, err := Uninstall(path); err != nil || n != 0 || backup != "" {
+		t.Fatalf("second uninstall should be a no-op: %v %d %q", err, n, backup)
+	}
+	if n, _, err := Uninstall(filepath.Join(dir, "missing.json")); err != nil || n != 0 {
+		t.Fatalf("missing file: %v %d", err, n)
+	}
+}
+
 func TestInstall_BackupAtomicIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
