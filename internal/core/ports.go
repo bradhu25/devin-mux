@@ -137,6 +137,11 @@ type Devin interface {
 	ToolCallOutcomes(ctx context.Context, devinSessionID string, toolUseIDs []string) ([]ToolCallOutcome, error)
 }
 
+// EventLog is the port for reading a session's normalized events.
+type EventLog interface {
+	Read(sessionID string) ([]SessionEvent, error)
+}
+
 // Store is the port for persisted State. Read returns an atomic snapshot
 // without locking; Update runs fn in an exclusive read-modify-write
 // transaction and persists only if fn returns nil.
