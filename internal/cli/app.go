@@ -30,6 +30,7 @@ type app struct {
 	devin      core.Devin
 	workspaces *core.WorkspaceManager
 	sessions   *core.SessionManager
+	reconciler *core.Reconciler
 }
 
 func (a *app) init() error {
@@ -61,6 +62,12 @@ func (a *app) init() error {
 			Devin:   a.devin,
 			Store:   st,
 			DmuxBin: self,
+		}
+		a.reconciler = &core.Reconciler{
+			Store:  st,
+			Events: state.EventLog{},
+			Tmux:   a.tmux,
+			Devin:  a.devin,
 		}
 	})
 	return a.err
