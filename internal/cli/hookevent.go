@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/bradhu25/devin-mux/internal/hooks"
+	"github.com/bradhu25/devin-mux/internal/state"
 )
 
 func newHookEventCmd() *cobra.Command {
@@ -21,7 +22,11 @@ func newHookEventCmd() *cobra.Command {
 			if err != nil {
 				return nil
 			}
-			_ = hooks.Record(hooks.Input{
+			rec := &hooks.Recorder{}
+			if store, err := state.OpenDefault(); err == nil {
+				rec.Store = store
+			}
+			_ = rec.Record(hooks.Input{
 				DmuxSessionID: os.Getenv("DMUX_SESSION_ID"),
 				ProjectDir:    os.Getenv("DEVIN_PROJECT_DIR"),
 				Payload:       payload,

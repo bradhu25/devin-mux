@@ -1,13 +1,16 @@
-// Package hooks receives raw Devin lifecycle hook payloads and appends them
-// to the per-session event log. Normalization into core.SessionEvent lives
-// here too (normalize.go, Spike 3 onward).
+// Package hooks receives raw Devin lifecycle hook payloads, normalizes
+// them into core.SessionEvents, and appends them to the per-session event
+// log. It runs inside `dmux hook-event`, synchronously in Devin's tool
+// loop, so everything here must be fast and must never fail loudly.
 package hooks
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"time"
 
+	"github.com/bradhu25/devin-mux/internal/core"
 	"github.com/bradhu25/devin-mux/internal/state"
 )
 
@@ -19,47 +22,96 @@ type Input struct {
 	Payload       []byte
 }
 
-// rawEvent is the Spike 3 wire format: the untouched Devin payload wrapped
-// with correlation metadata. Kept verbatim so we can study real payloads
-// before committing to the normalized SessionEvent contract.
-type rawEvent struct {
-	ReceivedAt    time.Time       `json:"receivedAt"`
-	DmuxSessionID string          `json:"dmuxSessionId"`
-	ProjectDir    string          `json:"projectDir,omitempty"`
-	HookEvent     string          `json:"hookEvent,omitempty"`
-	DevinSession  string          `json:"devinSessionId,omitempty"`
-	Payload       json.RawMessage `json:"payload"`
-}
-
 // ErrNotManaged is returned for hook invocations from Devin sessions that
 // dmux did not spawn (no DMUX_SESSION_ID). They are ignored by design.
 var ErrNotManaged = errors.New("hook event from a session not managed by dmux")
 
-// Record appends the payload to ~/.devin-mux/events/<dmuxSessionId>.jsonl.
-// Events without a dmux session id are dropped: dmux only observes sessions
-// it spawned.
-func Record(in Input) error {
+// Recorder writes normalized events and, on SessionStart, captures the
+// Devin session id into the Session record so `dmux resume` can use it.
+type Recorder struct {
+	// Store may be nil (then devinSessionId capture is skipped).
+	Store core.Store
+	// StoreTimeout bounds the state update; the hook must not stall Devin
+	// behind a slow lock. Defaults to 500ms.
+	StoreTimeout time.Duration
+	Now          func() time.Time
+}
+
+// Record normalizes and appends the event. Unknown hook names are recorded
+// verbatim as a raw line (never dropped) so new Devin events remain
+// inspectable. Events without a dmux session id are ignored.
+func (r *Recorder) Record(in Input) error {
 	if in.DmuxSessionID == "" {
 		return ErrNotManaged
 	}
+	now := time.Now().UTC()
+	if r.Now != nil {
+		now = r.Now()
+	}
+	ev, err := Normalize(in.DmuxSessionID, in.Payload, now)
+	if err != nil {
+		if errors.Is(err, ErrUnknownHook) {
+			return recordRaw(in, now)
+		}
+		return err
+	}
+	if in.ProjectDir != "" {
+		if ev.Data == nil {
+			ev.Data = map[string]any{}
+		}
+		ev.Data["projectDir"] = in.ProjectDir
+	}
+	if err := state.AppendSessionEvent(ev); err != nil {
+		return err
+	}
+	if ev.Type == core.SessionStarted && ev.DevinSessionID != "" && r.Store != nil {
+		r.captureDevinSessionID(ev.SessionID, ev.DevinSessionID)
+	}
+	return nil
+}
+
+// captureDevinSessionID is best-effort: a failure here only means resume
+// must fall back to the event log, which also carries the id.
+func (r *Recorder) captureDevinSessionID(sessionID, devinID string) {
+	timeout := r.StoreTimeout
+	if timeout == 0 {
+		timeout = 500 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_ = r.Store.Update(ctx, func(st *core.State) error {
+		s := st.Session(sessionID)
+		if s == nil {
+			return errors.New("unknown session")
+		}
+		if s.DevinSessionID == devinID {
+			return errors.New("unchanged") // skip the write
+		}
+		s.DevinSessionID = devinID
+		return nil
+	})
+}
+
+// recordRaw keeps unmapped hook payloads as a generic line.
+func recordRaw(in Input, now time.Time) error {
 	var meta struct {
 		HookEventName string `json:"hook_event_name"`
 		SessionID     string `json:"session_id"`
 	}
-	_ = json.Unmarshal(in.Payload, &meta) // best effort; payload kept raw regardless
-
+	_ = json.Unmarshal(in.Payload, &meta)
 	payload := json.RawMessage(in.Payload)
 	if !json.Valid(payload) {
 		payload, _ = json.Marshal(string(in.Payload))
 	}
-	line, err := json.Marshal(rawEvent{
-		ReceivedAt:    time.Now().UTC(),
-		DmuxSessionID: in.DmuxSessionID,
-		ProjectDir:    in.ProjectDir,
-		HookEvent:     meta.HookEventName,
-		DevinSession:  meta.SessionID,
-		Payload:       payload,
-	})
+	line, err := json.Marshal(struct {
+		EventID       string          `json:"eventId"`
+		SessionID     string          `json:"sessionId"`
+		DevinSession  string          `json:"devinSessionId,omitempty"`
+		Type          string          `json:"type"`
+		Timestamp     time.Time       `json:"timestamp"`
+		HookEventName string          `json:"hookEventName,omitempty"`
+		Payload       json.RawMessage `json:"payload"`
+	}{core.NewEventID(), in.DmuxSessionID, meta.SessionID, "raw", now, meta.HookEventName, payload})
 	if err != nil {
 		return err
 	}
