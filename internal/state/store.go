@@ -75,12 +75,27 @@ func (s *Store) Read() (*core.State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read state: %w", err)
 	}
+	var probe struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", stateFile, err)
+	}
+	switch {
+	case probe.Version > core.StateVersion:
+		return nil, fmt.Errorf("%s is schema version %d but this dmux understands %d; upgrade dmux", stateFile, probe.Version, core.StateVersion)
+	case probe.Version <= 1:
+		// Migrated in memory on every read until the next Update persists
+		// v2; reads stay lock-free and never write.
+		st, err := core.MigrateV1(data)
+		if err != nil {
+			return nil, fmt.Errorf("migrate %s from v1: %w", stateFile, err)
+		}
+		return st, nil
+	}
 	var st core.State
 	if err := json.Unmarshal(data, &st); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", stateFile, err)
-	}
-	if st.Version > core.StateVersion {
-		return nil, fmt.Errorf("%s is schema version %d but this dmux understands %d; upgrade dmux", stateFile, st.Version, core.StateVersion)
 	}
 	return &st, nil
 }

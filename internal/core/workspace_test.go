@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,215 +17,114 @@ func newManager(t *testing.T, git *fakeGit) (*WorkspaceManager, *fakeStore) {
 	return m, store
 }
 
-func TestCreate_HappyPath_MultiRepo(t *testing.T) {
+func TestCreate_RecordsReposWithoutWorktrees(t *testing.T) {
 	git := newFakeGit("/src/api", "/src/web")
+	git.repos["/src/web"]["release/1.2"] = true
 	m, store := newManager(t, git)
 
-	ws, err := m.Create(context.Background(), CreateWorkspaceInput{Name: "feature-x", Repos: []RepoSpec{{Path: "/src/api"}, {Path: "/src/web/sub/dir"}}})
+	ws, err := m.Create(context.Background(), CreateWorkspaceInput{Name: "feature-x", Repos: []RepoSpec{{Path: "/src/api"}, {Path: "/src/web/sub/dir", BaseRef: "release/1.2"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ws.Status != WorkspaceReady || ws.Root != filepath.Join(m.WorkspacesRoot, "feature-x") || !strings.HasPrefix(ws.ID, "ws_") {
-		t.Fatalf("unexpected workspace: %+v", ws)
+	if ws.Status != WorkspaceReady || len(ws.Repos) != 2 || ws.Root != filepath.Join(m.WorkspacesRoot, "feature-x") {
+		t.Fatalf("%+v", ws)
 	}
-	if len(ws.Repos) != 2 || ws.Repos[0].Name != "api" || ws.Repos[1].Name != "web" {
-		t.Fatalf("repos: %+v", ws.Repos)
+	if ws.Repos[0].BaseRef != "HEAD" || ws.Repos[1].BaseRef != "release/1.2" || ws.Repos[1].SourcePath != "/src/web" || ws.Repos[1].Name != "web" {
+		t.Fatalf("repo refs: %+v", ws.Repos)
 	}
-	for _, r := range ws.Repos {
-		if r.Branch != "dmux/feature-x" || !r.CreatedBranch || r.WorktreePath != filepath.Join(ws.Root, r.Name) || len(r.BaseRef) != 40 {
-			t.Fatalf("repo record: %+v", r)
-		}
-		if !dirExists(r.WorktreePath) {
-			t.Fatalf("worktree dir missing: %s", r.WorktreePath)
-		}
+	if !dirExists(ws.Root) {
+		t.Fatal("workspace root should exist")
 	}
-	// Persisted state matches, status ready.
-	if got := store.workspace(ws.ID); got == nil || got.Status != WorkspaceReady || len(got.Repos) != 2 {
-		t.Fatalf("persisted: %+v", got)
+	// No worktrees, no branches: the workspace is just a group.
+	if git.hasCall("worktreeadd") || len(git.repos["/src/api"]) != 1 {
+		t.Fatalf("workspace creation must not touch git worktrees/branches: %v", git.calls)
 	}
-	// AGENTS.md map written at root, mentions both repos and the branch.
-	md, err := os.ReadFile(filepath.Join(ws.Root, "AGENTS.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"# Workspace: feature-x", "| api | ./api | dmux/feature-x |", "| web | ./web |", "not a git repository"} {
-		if !strings.Contains(string(md), want) {
-			t.Errorf("AGENTS.md missing %q:\n%s", want, md)
-		}
-	}
-	// git was asked to create branches from the resolved sha, not "HEAD".
-	if !git.hasCall("resolveref:HEAD") || !git.hasCall("worktreeadd:"+ws.Repos[0].WorktreePath) {
-		t.Fatalf("calls: %v", git.calls)
+	if store.state.KnownRepos[0] != "/src/api" || len(store.state.KnownRepos) != 2 {
+		t.Fatalf("known repos: %v", store.state.KnownRepos)
 	}
 }
 
-func TestCreate_ExistingBranchIsNotOwned(t *testing.T) {
+func TestCreate_Validation(t *testing.T) {
 	git := newFakeGit("/src/api")
-	git.repos["/src/api"]["hotfix"] = true
+	m, store := newManager(t, git)
+	cases := map[string]CreateWorkspaceInput{
+		"bad name":     {Name: "bad name", Repos: []RepoSpec{{Path: "/src/api"}}},
+		"no repos":     {Name: "ok"},
+		"not a repo":   {Name: "ok", Repos: []RepoSpec{{Path: "/elsewhere"}}},
+		"dup repo":     {Name: "ok", Repos: []RepoSpec{{Path: "/src/api"}, {Path: "/src/api/x"}}},
+		"bad base ref": {Name: "ok", Repos: []RepoSpec{{Path: "/src/api", BaseRef: "nope"}}},
+	}
+	for name, in := range cases {
+		if _, err := m.Create(context.Background(), in); err == nil {
+			t.Errorf("%s: expected error", name)
+		}
+	}
+	if len(store.state.Workspaces) != 0 || store.updates != 0 {
+		t.Fatal("validation failures must not write state")
+	}
+}
+
+func TestCreate_DuplicateName(t *testing.T) {
+	git := newFakeGit("/src/api")
 	m, _ := newManager(t, git)
-
-	ws, err := m.Create(context.Background(), CreateWorkspaceInput{Name: "fix", Repos: []RepoSpec{{Path: "/src/api", Branch: "hotfix"}}})
-	if err != nil {
+	if _, err := m.Create(context.Background(), CreateWorkspaceInput{Name: "w", Repos: []RepoSpec{{Path: "/src/api"}}}); err != nil {
 		t.Fatal(err)
 	}
-	r := ws.Repos[0]
-	if r.Branch != "hotfix" || r.CreatedBranch {
-		t.Fatalf("existing branch must not be marked created: %+v", r)
+	_, err := m.Create(context.Background(), CreateWorkspaceInput{Name: "w", Repos: []RepoSpec{{Path: "/src/api"}}})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("want exists error, got %v", err)
 	}
 }
 
-func TestCreate_ValidationFailsBeforeAnySideEffect(t *testing.T) {
-	cases := []struct {
-		name string
-		in   CreateWorkspaceInput
-		want string
-	}{
-		{"bad name", CreateWorkspaceInput{Name: "has space", Repos: []RepoSpec{{Path: "/src/api"}}}, "invalid name"},
-		{"no repos", CreateWorkspaceInput{Name: "x"}, "at least one"},
-		{"not a repo", CreateWorkspaceInput{Name: "x", Repos: []RepoSpec{{Path: "/nowhere"}}}, "not a git repository"},
-		{"missing branch", CreateWorkspaceInput{Name: "x", Repos: []RepoSpec{{Path: "/src/api", Branch: "ghost"}}}, "does not exist"},
-		{"duplicate repo names", CreateWorkspaceInput{Name: "x", Repos: []RepoSpec{{Path: "/src/api"}, {Path: "/other/api"}}}, "both be named"},
-		{"branch already exists", CreateWorkspaceInput{Name: "taken", Repos: []RepoSpec{{Path: "/src/api"}}}, "already exists"},
-		{"branch checked out elsewhere", CreateWorkspaceInput{Name: "x", Repos: []RepoSpec{{Path: "/src/api", Branch: "main"}}}, "already checked out at /src/api"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			git := newFakeGit("/src/api", "/other/api")
-			git.repos["/src/api"]["dmux/taken"] = true
-			m, store := newManager(t, git)
-			_, err := m.Create(context.Background(), tc.in)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("want error containing %q, got %v", tc.want, err)
-			}
-			if git.hasCall("worktreeadd:") || len(store.state.Workspaces) != 0 {
-				t.Fatalf("validation failure must have no side effects: calls=%v state=%+v", git.calls, store.state)
-			}
-			for _, c := range git.calls {
-				if strings.HasPrefix(c, "worktreeadd") {
-					t.Fatalf("worktree created during validation: %v", git.calls)
-				}
-			}
-			if dirExists(filepath.Join(m.WorkspacesRoot, tc.in.Name)) {
-				t.Fatal("root dir created during validation")
-			}
-		})
-	}
-}
-
-func TestCreate_DuplicateNameRejectedByState(t *testing.T) {
+func TestCreate_StateFailureNoDir(t *testing.T) {
 	git := newFakeGit("/src/api")
 	m, store := newManager(t, git)
-	store.state.Workspaces = []Workspace{{ID: "ws_old", Name: "feature-x"}}
-	_, err := m.Create(context.Background(), CreateWorkspaceInput{Name: "feature-x", Repos: []RepoSpec{{Path: "/src/api"}}})
-	if !errors.Is(err, ErrWorkspaceExists) {
-		t.Fatalf("want ErrWorkspaceExists, got %v", err)
-	}
-	if len(store.state.Workspaces) != 1 {
-		t.Fatal("state must be unchanged")
-	}
-}
-
-// The core saga test: second worktree fails -> first is rolled back,
-// dmux-created branch deleted, root removed, workspace left as failed.
-func TestCreate_SecondRepoFails_RollsBackFirst(t *testing.T) {
-	git := newFakeGit("/src/api", "/src/web")
-	m, store := newManager(t, git)
-	root := filepath.Join(m.WorkspacesRoot, "feature-x")
-	git.failOn["worktreeadd:"+filepath.Join(root, "web")] = errors.New("disk full")
-
-	_, err := m.Create(context.Background(), CreateWorkspaceInput{Name: "feature-x", Repos: []RepoSpec{{Path: "/src/api"}, {Path: "/src/web"}}})
-	var ce *CreateError
-	if !errors.As(err, &ce) || ce.Step != "worktree add web" || ce.Rollback != nil {
-		t.Fatalf("want clean-rollback CreateError at 'worktree add web', got %v", err)
-	}
-	// Compensation happened.
-	if !git.hasCall("worktreeremove:"+filepath.Join(root, "api")) || !git.hasCall("branchdelete:dmux/feature-x") {
-		t.Fatalf("rollback calls missing: %v", git.calls)
-	}
-	if git.repos["/src/api"]["dmux/feature-x"] {
-		t.Fatal("dmux-created branch should be deleted on rollback")
-	}
-	if dirExists(root) {
-		t.Fatal("workspace root should be removed after rollback")
-	}
-	// Record kept, visibly failed, for doctor.
-	ws := store.state.Workspaces
-	if len(ws) != 1 || ws[0].Status != WorkspaceFailed {
-		t.Fatalf("workspace should remain with status failed: %+v", ws)
-	}
-}
-
-// If the user supplied the branch, rollback must NOT delete it.
-func TestCreate_RollbackNeverDeletesPreexistingBranch(t *testing.T) {
-	git := newFakeGit("/src/api", "/src/web")
-	git.repos["/src/api"]["hotfix"] = true
-	m, _ := newManager(t, git)
-	root := filepath.Join(m.WorkspacesRoot, "fix")
-	git.failOn["worktreeadd:"+filepath.Join(root, "web")] = errors.New("boom")
-
-	_, err := m.Create(context.Background(), CreateWorkspaceInput{Name: "fix", Repos: []RepoSpec{{Path: "/src/api", Branch: "hotfix"}, {Path: "/src/web"}}})
-	if err == nil {
-		t.Fatal("expected failure")
-	}
-	if git.hasCall("branchdelete:hotfix") || !git.repos["/src/api"]["hotfix"] {
-		t.Fatalf("pre-existing branch must survive rollback: %v", git.calls)
-	}
-}
-
-// Rollback itself failing is reported, not hidden, and the record stays failed.
-func TestCreate_RollbackFailureIsReported(t *testing.T) {
-	git := newFakeGit("/src/api", "/src/web")
-	m, store := newManager(t, git)
-	root := filepath.Join(m.WorkspacesRoot, "ws")
-	git.failOn["worktreeadd:"+filepath.Join(root, "web")] = errors.New("boom")
-	git.failOn["worktreeremove:"+filepath.Join(root, "api")] = errors.New("locked")
-
-	_, err := m.Create(context.Background(), CreateWorkspaceInput{Name: "ws", Repos: []RepoSpec{{Path: "/src/api"}, {Path: "/src/web"}}})
-	var ce *CreateError
-	if !errors.As(err, &ce) || ce.Rollback == nil || !strings.Contains(err.Error(), "dmux doctor") {
-		t.Fatalf("rollback failure must be surfaced with doctor hint: %v", err)
-	}
-	if store.state.Workspaces[0].Status != WorkspaceFailed || len(store.state.Workspaces[0].Repos) != 1 {
-		t.Fatalf("failed record should list the repo that still exists: %+v", store.state.Workspaces[0])
-	}
-}
-
-func TestCreate_StateReservationFailure_NoSideEffects(t *testing.T) {
-	git := newFakeGit("/src/api")
-	m, store := newManager(t, git)
-	store.failNext = errors.New("lock timeout")
-	_, err := m.Create(context.Background(), CreateWorkspaceInput{Name: "x", Repos: []RepoSpec{{Path: "/src/api"}}})
-	if err == nil || !strings.Contains(err.Error(), "lock timeout") {
-		t.Fatalf("want store error, got %v", err)
-	}
-	for _, c := range git.calls {
-		if strings.HasPrefix(c, "worktreeadd") {
-			t.Fatal("no worktree may be created if reservation failed")
-		}
-	}
-	if dirExists(filepath.Join(m.WorkspacesRoot, "x")) {
-		t.Fatal("no root dir may be created if reservation failed")
+	store.failNext = errors.New("disk full")
+	_, err := m.Create(context.Background(), CreateWorkspaceInput{Name: "w", Repos: []RepoSpec{{Path: "/src/api"}}})
+	if err == nil || dirExists(filepath.Join(m.WorkspacesRoot, "w")) {
+		t.Fatalf("state failure must leave no directory: %v", err)
 	}
 }
 
 func TestList(t *testing.T) {
-	m, store := newManager(t, newFakeGit())
-	store.state.Workspaces = []Workspace{{ID: "a"}, {ID: "b"}}
-	got, err := m.List()
-	if err != nil || len(got) != 2 {
-		t.Fatalf("List = %v %v", got, err)
+	m, _ := newManager(t, newFakeGit("/src/api"))
+	if _, err := m.Create(context.Background(), CreateWorkspaceInput{Name: "a", Repos: []RepoSpec{{Path: "/src/api"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := m.List(); len(l) != 1 || l[0].Name != "a" {
+		t.Fatalf("%+v", l)
 	}
 }
 
-func TestWorkspaceAgentsMD_TruncatesShaAndListsRepos(t *testing.T) {
-	md := WorkspaceAgentsMD(&Workspace{Name: "w", Repos: []WorkspaceRepo{
-		{Name: "api", Branch: "dmux/w", BaseRef: "0123456789abcdef0123456789abcdef01234567"},
-		{Name: "web", Branch: "hotfix", BaseRef: "hotfix"},
-	}})
-	if !strings.Contains(md, "| api | ./api | dmux/w | 0123456789ab |") || !strings.Contains(md, "| web | ./web | hotfix | hotfix |") {
-		t.Fatalf("unexpected table:\n%s", md)
+func TestSessionAgentsMD(t *testing.T) {
+	ws := &Workspace{Name: "feature-x"}
+	s := &Session{ID: "s_1", Task: "Fix auth", Repos: []WorkspaceRepo{
+		{Name: "api", Branch: "dmux/feature-x/fix-auth", BaseRef: "0123456789abcdef0123456789abcdef01234567"},
+		{Name: "web", Branch: "release/1.2", BaseRef: "release/1.2"},
+	}}
+	md := SessionAgentsMD(ws, s)
+	for _, want := range []string{"# Workspace: feature-x — session s_1", "Task: Fix auth", "| api | ./api | dmux/feature-x/fix-auth | 0123456789ab |", "| web | ./web | release/1.2 | release/1.2 |", "other\nsessions work in other directories"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("missing %q in:\n%s", want, md)
+		}
 	}
-	if fileExists("/definitely/not/here") {
-		t.Fatal("helper sanity")
+}
+
+func TestSlugAndBranchName(t *testing.T) {
+	for in, want := range map[string]string{
+		"Add table-driven tests for the router": "add-table-driven-tests-for-the-router",
+		"  Fix: auth/bug #12 !!  ":              "fix-auth-bug-12",
+		"":                                      "",
+		strings.Repeat("word ", 20):             "word-word-word-word-word-word-word-word",
+	} {
+		if got := Slug(in); got != want {
+			t.Errorf("Slug(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := BranchName("chi", "Add tests", "s_1"); got != "dmux/chi/add-tests" {
+		t.Fatalf("%q", got)
+	}
+	if got := BranchName("chi", "", "s_1"); got != "dmux/chi/s_1" {
+		t.Fatalf("no task should fall back to the id: %q", got)
 	}
 }

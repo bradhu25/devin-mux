@@ -92,8 +92,10 @@ func TestState_Lookups(t *testing.T) {
 func TestState_JSONRoundTrip(t *testing.T) {
 	in := State{Version: StateVersion, Workspaces: []Workspace{{
 		ID: "ws_1", Name: "feature-x", Root: "/r/feature-x", Status: WorkspaceReady,
-		Repos: []WorkspaceRepo{{Name: "api", SourcePath: "/src/api", WorktreePath: "/r/feature-x/api", Branch: "dmux/feature-x", BaseRef: "main", CreatedBranch: true}},
-	}}, Sessions: []Session{{ID: "s_1", WorkspaceID: "ws_1", Task: "fix auth", Tmux: TmuxTarget{SessionName: "dmux-feature-x", SessionID: "$3", WindowID: "@12"}}}}
+		Repos: []RepoRef{{Name: "api", SourcePath: "/src/api", BaseRef: "main"}},
+	}}, Sessions: []Session{{ID: "s_1", WorkspaceID: "ws_1", Task: "fix auth", Root: "/r/feature-x/s_1", Status: WorkspaceReady,
+		Repos: []WorkspaceRepo{{Name: "api", SourcePath: "/src/api", WorktreePath: "/r/feature-x/s_1/api", Branch: "dmux/feature-x/fix-auth", BaseRef: "abc", CreatedBranch: true}},
+		Tmux:  TmuxTarget{SessionName: "dmux-feature-x", SessionID: "$3", WindowID: "@12"}}}}
 	b, err := json.Marshal(in)
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +104,7 @@ func TestState_JSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(b, &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Workspaces[0].Repos[0].CreatedBranch != true || out.Sessions[0].Tmux.WindowID != "@12" || out.Workspaces[0].Status != WorkspaceReady {
+	if out.Sessions[0].Repos[0].CreatedBranch != true || out.Sessions[0].Tmux.WindowID != "@12" || out.Workspaces[0].Repos[0].BaseRef != "main" || out.Sessions[0].Root != "/r/feature-x/s_1" {
 		t.Fatalf("round trip lost data: %+v", out)
 	}
 	// Derived fields must not be part of the persisted model.

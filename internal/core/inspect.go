@@ -23,18 +23,18 @@ func (r RepoStatus) Clean() bool {
 	return r.Err == nil && !r.Missing && !r.Locked && len(r.Dirty) == 0 && r.CommitsAhead == 0
 }
 
-// WorkspaceStatus is the inspection of a whole workspace.
-type WorkspaceInspection struct {
-	Workspace Workspace
-	Repos     []RepoStatus
-	// Sessions recorded in the workspace, with liveness; filled by callers
-	// that have a Reconciler (rm) — inspection itself is git-only.
+// SessionInspection is the inspection of one session's worktrees. A joiner
+// (SharedWith set) owns nothing and has no Repos entries of its own; the
+// owner's inspection covers them.
+type SessionInspection struct {
+	Session Session
+	Repos   []RepoStatus
 }
 
-// AnyUnsafe reports whether any repo has work that removal would lose or
-// a lock that forbids removal.
-func (w WorkspaceInspection) AnyUnsafe() bool {
-	for _, r := range w.Repos {
+// AnyUnsafe reports whether any repo has work that removal would lose or a
+// lock that forbids removal.
+func (s SessionInspection) AnyUnsafe() bool {
+	for _, r := range s.Repos {
 		if !r.Clean() {
 			return true
 		}
@@ -42,8 +42,24 @@ func (w WorkspaceInspection) AnyUnsafe() bool {
 	return false
 }
 
-// Inspect reports, per repo, uncommitted changes, commits not in the base
-// ref, and worktree locks. It is read-only.
+// WorkspaceInspection is the inspection of every session in a workspace.
+type WorkspaceInspection struct {
+	Workspace Workspace
+	Sessions  []SessionInspection
+}
+
+// AnyUnsafe aggregates over sessions.
+func (w WorkspaceInspection) AnyUnsafe() bool {
+	for _, s := range w.Sessions {
+		if s.AnyUnsafe() {
+			return true
+		}
+	}
+	return false
+}
+
+// Inspect reports, per session and repo, uncommitted changes, commits not
+// in the base, and worktree locks. Read-only.
 func (m *WorkspaceManager) Inspect(ctx context.Context, query string) (*WorkspaceInspection, error) {
 	st, err := m.Store.Read()
 	if err != nil {
@@ -57,14 +73,36 @@ func (m *WorkspaceManager) Inspect(ctx context.Context, query string) (*Workspac
 		return nil, fmt.Errorf("%w: %s", ErrWorkspaceNotFound, query)
 	}
 	out := &WorkspaceInspection{Workspace: *ws}
-	for _, repo := range ws.Repos {
-		out.Repos = append(out.Repos, m.inspectRepo(ctx, repo))
+	for _, s := range st.SessionsIn(ws.ID) {
+		out.Sessions = append(out.Sessions, inspectSession(ctx, m.Git, s))
 	}
 	return out, nil
 }
 
-func (m *WorkspaceManager) inspectRepo(ctx context.Context, repo WorkspaceRepo) RepoStatus {
-	return inspectRepo(ctx, m.Git, repo)
+// InspectSession inspects one session's worktrees (resolved by id, prefix,
+// or task text).
+func (m *WorkspaceManager) InspectSession(ctx context.Context, query string) (*SessionInspection, error) {
+	st, err := m.Store.Read()
+	if err != nil {
+		return nil, err
+	}
+	s, err := findSession(st, query)
+	if err != nil {
+		return nil, err
+	}
+	insp := inspectSession(ctx, m.Git, *s)
+	return &insp, nil
+}
+
+func inspectSession(ctx context.Context, g Git, s Session) SessionInspection {
+	insp := SessionInspection{Session: s}
+	if !s.OwnsWorktrees() {
+		return insp
+	}
+	for _, repo := range s.Repos {
+		insp.Repos = append(insp.Repos, inspectRepo(ctx, g, repo))
+	}
+	return insp
 }
 
 // inspectRepo is the shared read-only inspection used by status, rm, and

@@ -29,8 +29,8 @@ func completionApp(t *testing.T) *app {
 	}
 	err = st.Update(context.Background(), func(s *core.State) error {
 		s.Workspaces = []core.Workspace{
-			{ID: "ws_1", Name: "feature-x", Status: core.WorkspaceReady, Repos: []core.WorkspaceRepo{{Name: "api"}, {Name: "web"}}},
-			{ID: "ws_2", Name: "payment-fix", Status: core.WorkspaceFailed, Repos: []core.WorkspaceRepo{{Name: "api"}}},
+			{ID: "ws_1", Name: "feature-x", Status: core.WorkspaceReady, Repos: []core.RepoRef{{Name: "api"}, {Name: "web"}}},
+			{ID: "ws_2", Name: "payment-fix", Status: core.WorkspaceFailed, Repos: []core.RepoRef{{Name: "api"}}},
 		}
 		s.Sessions = []core.Session{
 			{ID: "s_live01", WorkspaceID: "ws_1", Task: "auth implementation", Tmux: core.TmuxTarget{WindowID: "@1"}},

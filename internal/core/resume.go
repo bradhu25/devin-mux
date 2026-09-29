@@ -67,6 +67,13 @@ func (m *SessionManager) Resume(ctx context.Context, in ResumeInput) (*ResumeRes
 	if ws.Status != WorkspaceReady {
 		return nil, fmt.Errorf("%w: %s is %s", ErrWorkspaceNotReady, ws.Name, ws.Status)
 	}
+	if sess.Status != WorkspaceReady {
+		return nil, fmt.Errorf("session %s is %s (run `dmux doctor`)", sess.ID, sess.Status)
+	}
+	cwd := sess.Root
+	if cwd == "" {
+		cwd = ws.Root
+	}
 
 	// Conversation id: record first, event log second.
 	devinID := sess.DevinSessionID
@@ -100,14 +107,14 @@ func (m *SessionManager) Resume(ctx context.Context, in ResumeInput) (*ResumeRes
 		oldWindow = w.WindowID // held or dead pane; close it below
 	}
 
-	argv := append([]string{m.DmuxBin, "run", "--session", sess.ID, "--dir", ws.Root, "--"},
+	argv := append([]string{m.DmuxBin, "run", "--session", sess.ID, "--dir", cwd, "--"},
 		m.Devin.LaunchArgs(LaunchSpec{ResumeID: devinID, Prompt: in.Prompt, PermissionMode: in.PermissionMode, Model: in.Model})...)
 	target, err := m.Tmux.SpawnWindow(ctx, SpawnWindowOpts{
 		SessionName: m.prefix() + ws.Name,
 		WorkspaceID: ws.ID,
 		WindowName:  WindowName(sess.Task, sess.ID),
 		SessionID:   sess.ID,
-		Cwd:         ws.Root,
+		Cwd:         cwd,
 		Env:         map[string]string{"DMUX_SESSION_ID": sess.ID},
 		Argv:        argv,
 	})

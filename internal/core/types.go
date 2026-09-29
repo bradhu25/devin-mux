@@ -10,8 +10,9 @@ package core
 
 import "time"
 
-// WorkspaceStatus is the saga state of a workspace. Anything other than
-// Ready is transitional or failed and is reconciled by `dmux doctor`.
+// WorkspaceStatus is the saga state of a workspace or session. Anything
+// other than Ready is transitional or failed and is reconciled by `dmux
+// doctor`.
 type WorkspaceStatus string
 
 const (
@@ -21,25 +22,34 @@ const (
 	WorkspaceFailed   WorkspaceStatus = "failed"
 )
 
-// Workspace is a named unit containing git worktrees of 1..N repos.
-// Isolation is workspace-level, not session-level: sessions within one
-// workspace share files and branches.
+// Workspace is the user's logical unit of work (a project, workstream,
+// feature): a name plus the set of source repos it spans. It owns no
+// worktrees itself; every Session spawned in it gets its own worktree and
+// branch per repo, so sessions are isolated from each other by default.
 type Workspace struct {
 	ID        string          `json:"id"`   // stable, e.g. ws_a91c3f
 	Name      string          `json:"name"` // display name; renamable without cascading
-	Root      string          `json:"root"` // physical dir; Devin's cwd. Named at creation, never moved.
-	Repos     []WorkspaceRepo `json:"repos"`
+	Root      string          `json:"root"` // parent dir of session dirs. Named at creation, never moved.
+	Repos     []RepoRef       `json:"repos"`
 	Status    WorkspaceStatus `json:"status"`
 	CreatedAt time.Time       `json:"createdAt"`
 }
 
-// WorkspaceRepo is one repo's worktree inside a workspace.
+// RepoRef is one source repo a workspace spans and where sessions branch
+// from in it.
+type RepoRef struct {
+	Name       string `json:"name"`       // subdirectory name inside each session dir
+	SourcePath string `json:"sourcePath"` // original checkout; worktree ops run against it
+	BaseRef    string `json:"baseRef"`    // ref new session branches start from ("HEAD" = the repo's current HEAD at spawn)
+}
+
+// WorkspaceRepo is one repo's worktree inside a session dir.
 type WorkspaceRepo struct {
-	Name          string `json:"name"`          // subdirectory name under Root
+	Name          string `json:"name"`          // subdirectory name under the session Root
 	SourcePath    string `json:"sourcePath"`    // original checkout; worktree ops run against it
 	WorktreePath  string `json:"worktreePath"`  // Root/Name
 	Branch        string `json:"branch"`        // branch checked out in the worktree
-	BaseRef       string `json:"baseRef"`       // ref the branch was created from (merge-back helpers)
+	BaseRef       string `json:"baseRef"`       // commit the branch was created from (merge-back helpers)
 	CreatedBranch bool   `json:"createdBranch"` // dmux created Branch -> eligible for `git branch -d` on cleanup. Never delete pre-existing branches.
 }
 
@@ -79,17 +89,26 @@ type TmuxTarget struct {
 	WindowID    string `json:"windowId"`  // @N
 }
 
-// Session is one Devin CLI session scoped to a task inside a workspace.
-// Only facts dmux authored are stored; Lifecycle and Activity are derived
-// on read from events + liveness and are not persisted.
+// Session is one Devin agent working on a task inside a workspace, with its
+// own worktree and branch per repo under Root (Devin's cwd). Only facts
+// dmux authored are stored; Lifecycle and Activity are derived on read from
+// events + liveness and are not persisted.
 type Session struct {
-	ID             string     `json:"id"`          // stable, e.g. s_7f2e9a
-	WorkspaceID    string     `json:"workspaceId"` // reference by ID, not name
-	Task           string     `json:"task"`
-	Tmux           TmuxTarget `json:"tmux"`
-	DevinSessionID string     `json:"devinSessionId,omitempty"` // captured from hook session_id; enables `devin -r`
-	CreatedAt      time.Time  `json:"createdAt"`
+	ID             string          `json:"id"`          // stable, e.g. s_7f2e9a
+	WorkspaceID    string          `json:"workspaceId"` // reference by ID, not name
+	Task           string          `json:"task"`
+	Root           string          `json:"root"`  // session dir; Devin's cwd; contains one worktree per repo
+	Repos          []WorkspaceRepo `json:"repos"` // this session's worktrees (empty while creating)
+	Status         WorkspaceStatus `json:"status"`
+	SharedWith     string          `json:"sharedWith,omitempty"` // set when spawned with --in: this session works in that session's worktrees and owns none
+	Tmux           TmuxTarget      `json:"tmux"`
+	DevinSessionID string          `json:"devinSessionId,omitempty"` // captured from hook session_id; enables `devin -r`
+	CreatedAt      time.Time       `json:"createdAt"`
 }
+
+// OwnsWorktrees reports whether this session's Repos are its own (as
+// opposed to joined from another session via --in).
+func (s Session) OwnsWorktrees() bool { return s.SharedWith == "" }
 
 // EventType is the normalized event contract. It is independent of Devin's
 // raw hook payloads so a future ACP adapter can emit the same events and
@@ -148,8 +167,9 @@ func (s *State) RememberRepo(path string) {
 	s.KnownRepos = append(s.KnownRepos, path)
 }
 
-// StateVersion is the current schema version of State.
-const StateVersion = 1
+// StateVersion is the current schema version of State. v1 (workspaces
+// owned the worktrees) is migrated on read by MigrateV1.
+const StateVersion = 2
 
 // Workspace returns the workspace with the given ID, or nil.
 func (s *State) Workspace(id string) *Workspace {
@@ -180,6 +200,17 @@ func (s *State) Session(id string) *Session {
 		}
 	}
 	return nil
+}
+
+// Joiners returns sessions that share ownerID's worktrees (spawned --in).
+func (s *State) Joiners(ownerID string) []Session {
+	var out []Session
+	for _, sess := range s.Sessions {
+		if sess.SharedWith == ownerID {
+			out = append(out, sess)
+		}
+	}
+	return out
 }
 
 // SessionsIn returns all sessions belonging to a workspace.

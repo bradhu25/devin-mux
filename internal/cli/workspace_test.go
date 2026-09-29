@@ -22,7 +22,7 @@ func TestParseRepoSpecs(t *testing.T) {
 		t.Fatal(err)
 	}
 	real, _ := filepath.Abs(dir)
-	want := []core.RepoSpec{{Path: real}, {Path: real, Branch: "release/1.2"}, {Path: filepath.Join(real, "weird@name")}}
+	want := []core.RepoSpec{{Path: real}, {Path: real, BaseRef: "release/1.2"}, {Path: filepath.Join(real, "weird@name")}}
 	for i := range want {
 		if specs[i] != want[i] {
 			t.Errorf("spec %d = %+v, want %+v", i, specs[i], want[i])
@@ -49,17 +49,20 @@ func TestParseRepoSpecs_ExpandsHome(t *testing.T) {
 
 func TestRenderWorkspaces(t *testing.T) {
 	var buf bytes.Buffer
-	if err := renderWorkspaces(&buf, nil); err != nil || !strings.Contains(buf.String(), "No workspaces") {
+	if err := renderWorkspaces(&buf, &core.State{}); err != nil || !strings.Contains(buf.String(), "No workspaces") {
 		t.Fatalf("empty render: %q %v", buf.String(), err)
 	}
 	buf.Reset()
-	err := renderWorkspaces(&buf, []core.Workspace{{Name: "feature-x", ID: "ws_1", Status: core.WorkspaceReady, Root: "/r/feature-x",
-		Repos: []core.WorkspaceRepo{{Name: "api", Branch: "dmux/feature-x"}, {Name: "web", Branch: "hotfix"}}}})
+	err := renderWorkspaces(&buf, &core.State{
+		Workspaces: []core.Workspace{{Name: "feature-x", ID: "ws_1", Status: core.WorkspaceReady, Root: "/r/feature-x",
+			Repos: []core.RepoRef{{Name: "api", BaseRef: "HEAD"}, {Name: "web", BaseRef: "release/1.2"}}}},
+		Sessions: []core.Session{{ID: "s_1", WorkspaceID: "ws_1"}, {ID: "s_2", WorkspaceID: "ws_1"}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{"NAME", "feature-x", "ws_1", "ready", "api@dmux/feature-x,web@hotfix", "/r/feature-x"} {
+	for _, want := range []string{"NAME", "SESSIONS", "feature-x", "ws_1", "ready", "api,web@release/1.2", "/r/feature-x"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}

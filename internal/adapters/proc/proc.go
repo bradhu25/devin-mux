@@ -42,8 +42,12 @@ func signalGroup(pid int, sig syscall.Signal) error {
 		return errors.New("refusing to signal pid <= 1")
 	}
 	err := syscall.Kill(-pid, sig)
-	if errors.Is(err, syscall.ESRCH) {
-		return nil // already gone
+	if errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
+		// ESRCH: already gone. EPERM: the id now belongs to a process we do
+		// not own, i.e. it was recycled after ours exited; dmux only signals
+		// groups it created, so this is "gone" too, and signalling it would
+		// be wrong.
+		return nil
 	}
 	return err
 }

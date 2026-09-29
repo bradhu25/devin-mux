@@ -39,7 +39,7 @@ func RenderSnapshot(w io.Writer, snap *core.Snapshot, verbose bool) error {
 		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "WORKSPACE\tSESSION\tSTATUS\tTASK\tLAST EVENT\tDEVIN")
+	fmt.Fprintln(tw, "WORKSPACE\tSESSION\tSTATUS\tTASK\tBRANCH\tLAST EVENT")
 	for _, wv := range snap.Workspaces {
 		if len(wv.Sessions) == 0 {
 			fmt.Fprintf(tw, "%s\t-\t%s\t(no sessions)\t\t\n", wv.Workspace.Name, string(wv.Workspace.Status))
@@ -55,8 +55,11 @@ func RenderSnapshot(w io.Writer, snap *core.Snapshot, verbose bool) error {
 			if !sv.Status.LastEventAt.IsZero() {
 				last = fmt.Sprintf("%s %s", sv.Status.LastEventType, ago(snap.TakenAt.Sub(sv.Status.LastEventAt)))
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", wv.Workspace.Name, sv.Session.ID, status, core.WindowName(sv.Session.Task, ""), last, sv.Status.DevinSessionID)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", wv.Workspace.Name, sv.Session.ID, status, core.WindowName(sv.Session.Task, ""), BranchSummary(sv.Session), last)
 			if verbose {
+				if sv.Status.DevinSessionID != "" || sv.Session.Root != "" {
+					fmt.Fprintf(tw, "\t\t  devin %s  dir %s\t\t\t\n", sv.Status.DevinSessionID, sv.Session.Root)
+				}
 				for _, e := range sv.Evidence {
 					fmt.Fprintf(tw, "\t\t  · %s\t\t\t\n", e)
 				}
@@ -90,4 +93,30 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// BranchSummary renders a session's branches for the board: one name when
+// every repo uses the same branch (the common case), "repo:branch" pairs
+// otherwise, and "↳ <owner>" for a session that joined another's worktrees.
+func BranchSummary(s core.Session) string {
+	if !s.OwnsWorktrees() {
+		return "↳ " + s.SharedWith
+	}
+	if len(s.Repos) == 0 {
+		return ""
+	}
+	same := true
+	for _, r := range s.Repos[1:] {
+		if r.Branch != s.Repos[0].Branch {
+			same = false
+		}
+	}
+	if same {
+		return s.Repos[0].Branch
+	}
+	parts := make([]string, len(s.Repos))
+	for i, r := range s.Repos {
+		parts[i] = r.Name + ":" + r.Branch
+	}
+	return strings.Join(parts, " ")
 }

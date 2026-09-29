@@ -59,6 +59,7 @@ func (a *app) init() error {
 			WorkspacesRoot: filepath.Join(st.Dir(), "workspaces"),
 		}
 		a.sessions = &core.SessionManager{
+			Git:     a.git,
 			Tmux:    a.tmux,
 			Devin:   a.devin,
 			Store:   st,

@@ -22,7 +22,10 @@ type fakeGit struct {
 	ahead    map[string]int             // worktree path -> commits ahead of base
 	locked   map[string]bool            // worktree path -> locked
 	calls    []string
-	failOn   map[string]error // "op:arg" -> error
+	failOn   map[string]error // "op:arg" -> error; "op:*" matches any arg
+	// failPathSuffix/failPathErr make WorktreeAdd fail for paths with that suffix.
+	failPathSuffix string
+	failPathErr    error
 }
 
 // newFakeGit creates repos whose main checkout has "main" checked out, as
@@ -46,6 +49,9 @@ func (f *fakeGit) record(op string, args ...string) error {
 	}
 	f.calls = append(f.calls, key)
 	if err, ok := f.failOn[key]; ok {
+		return err
+	}
+	if err, ok := f.failOn[op+":*"]; ok {
 		return err
 	}
 	return nil
@@ -84,6 +90,9 @@ func (f *fakeGit) ResolveRef(_ context.Context, repo, ref string) (string, error
 func (f *fakeGit) WorktreeAdd(_ context.Context, repo, path string, opts WorktreeAddOpts) error {
 	if err := f.record("worktreeadd", path); err != nil {
 		return err
+	}
+	if f.failPathSuffix != "" && strings.HasSuffix(path, f.failPathSuffix) {
+		return f.failPathErr
 	}
 	if opts.NewBranch != "" {
 		if f.repos[repo][opts.NewBranch] {
@@ -217,12 +226,6 @@ func (s *fakeStore) Update(_ context.Context, fn func(*State) error) error {
 	}
 	s.state = cp
 	return nil
-}
-
-func (s *fakeStore) workspace(id string) *Workspace {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.state.Workspace(id)
 }
 
 // dirExists is a small test helper.

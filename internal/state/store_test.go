@@ -208,3 +208,34 @@ func TestStore_LockTimeout(t *testing.T) {
 		t.Fatalf("want ErrLockTimeout, got %v", err)
 	}
 }
+
+func TestStore_ReadMigratesV1(t *testing.T) {
+	dir := t.TempDir()
+	v1 := `{"version":1,"workspaces":[{"id":"ws_1","name":"w","root":"/r/w","status":"ready","createdAt":"2026-09-28T10:00:00Z","repos":[{"name":"api","sourcePath":"/src/api","worktreePath":"/r/w/api","branch":"dmux/w","baseRef":"abc","createdBranch":true}]}],"sessions":[{"id":"s_1","workspaceId":"ws_1","task":"t","tmux":{"sessionName":"","sessionId":"","windowId":""},"createdAt":"2026-09-28T10:01:00Z"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(v1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Version != core.StateVersion || st.Session("s_1").Root != "/r/w" || len(st.Session("s_1").Repos) != 1 {
+		t.Fatalf("read should migrate in memory: %+v", st.Session("s_1"))
+	}
+	// Read never writes: the file is still v1 until an Update.
+	raw, _ := os.ReadFile(filepath.Join(dir, "state.json"))
+	if !strings.Contains(string(raw), `"version":1`) {
+		t.Fatal("Read must not rewrite the file")
+	}
+	if err := s.Update(context.Background(), func(*core.State) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(filepath.Join(dir, "state.json"))
+	if !strings.Contains(string(raw), `"version": 2`) && !strings.Contains(string(raw), `"version":2`) {
+		t.Fatalf("Update should persist v2: %s", raw[:80])
+	}
+}

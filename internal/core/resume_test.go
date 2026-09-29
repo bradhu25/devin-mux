@@ -12,8 +12,8 @@ func resumeFixture(t *testing.T) (*SessionManager, *fakeStore, *listingTmux, *mu
 	store := &fakeStore{state: State{
 		Workspaces: []Workspace{{ID: "ws_1", Name: "feature-x", Root: "/r/feature-x", Status: WorkspaceReady}},
 		Sessions: []Session{
-			{ID: "s_1", WorkspaceID: "ws_1", Task: "auth", DevinSessionID: "olive-turkey", Tmux: TmuxTarget{WindowID: "@1"}, CreatedAt: t0},
-			{ID: "s_2", WorkspaceID: "ws_1", Task: "no devin id", Tmux: TmuxTarget{WindowID: "@2"}, CreatedAt: t0},
+			{ID: "s_1", WorkspaceID: "ws_1", Task: "auth", Root: "/r/feature-x/s_1", Status: WorkspaceReady, DevinSessionID: "olive-turkey", Tmux: TmuxTarget{WindowID: "@1"}, CreatedAt: t0},
+			{ID: "s_2", WorkspaceID: "ws_1", Task: "no devin id", Root: "/r/feature-x/s_2", Status: WorkspaceReady, Tmux: TmuxTarget{WindowID: "@2"}, CreatedAt: t0},
 		},
 	}}
 	tm := &listingTmux{}
@@ -37,11 +37,11 @@ func TestResume_ExitedSession_NoWindow(t *testing.T) {
 		t.Fatalf("res: %+v", res)
 	}
 	o := tm.spawned[0]
-	want := "/usr/local/bin/dmux run --session s_1 --dir /r/feature-x -- devin -r olive-turkey -- continue please"
+	want := "/usr/local/bin/dmux run --session s_1 --dir /r/feature-x/s_1 -- devin -r olive-turkey -- continue please"
 	if strings.Join(o.Argv, " ") != want {
 		t.Fatalf("argv:\n got %q\nwant %q", strings.Join(o.Argv, " "), want)
 	}
-	if o.Cwd != "/r/feature-x" || o.SessionID != "s_1" || o.Env["DMUX_SESSION_ID"] != "s_1" || o.SessionName != "dmux-feature-x" {
+	if o.Cwd != "/r/feature-x/s_1" || o.SessionID != "s_1" || o.Env["DMUX_SESSION_ID"] != "s_1" || o.SessionName != "dmux-feature-x" {
 		t.Fatalf("spawn opts: %+v", o)
 	}
 	// Record points at the new window.

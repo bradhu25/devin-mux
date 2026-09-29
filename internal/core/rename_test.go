@@ -29,7 +29,11 @@ func TestRename(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.state.Sessions = []Session{{ID: "s_1", WorkspaceID: ws.ID, Tmux: TmuxTarget{SessionName: "dmux-typo-x", SessionID: "$3", WindowID: "@1"}}}
+	sessRoot := filepath.Join(ws.Root, "s_1")
+	if err := os.MkdirAll(sessRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store.state.Sessions = []Session{{ID: "s_1", WorkspaceID: ws.ID, Root: sessRoot, Status: WorkspaceReady, Repos: []WorkspaceRepo{{Name: "api", Branch: "dmux/typo-x/x"}}, Tmux: TmuxTarget{SessionName: "dmux-typo-x", SessionID: "$3", WindowID: "@1"}}}
 	tm := &renamingTmux{}
 	tm.windows = []TmuxWindow{{SessionID: "$3", WindowID: "@1", DmuxSession: "s_1", WorkspaceID: ws.ID}}
 
@@ -48,8 +52,8 @@ func TestRename(t *testing.T) {
 	if tm.renamed["$3"] != "dmux-feature-x" {
 		t.Fatalf("tmux session not renamed: %v", tm.renamed)
 	}
-	// AGENTS.md regenerated with the new name; directory not moved.
-	md, _ := os.ReadFile(filepath.Join(ws.Root, "AGENTS.md"))
+	// Session AGENTS.md regenerated with the new name; directories not moved.
+	md, _ := os.ReadFile(filepath.Join(sessRoot, "AGENTS.md"))
 	if !strings.Contains(string(md), "# Workspace: feature-x") || filepath.Base(ws.Root) != "typo-x" {
 		t.Fatalf("map/dir: %s %s", md, ws.Root)
 	}

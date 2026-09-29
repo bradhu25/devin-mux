@@ -44,9 +44,7 @@ type Doctor struct {
 	// BinaryOnPath, if set, reports whether `dmux` resolves on PATH to the
 	// running binary, plus the fix to suggest when it does not.
 	BinaryOnPath func() (ok bool, advice string)
-	// KnownRepos are source repos to scan for orphan dmux branches even when
-	// no current workspace references them (e.g. remembered from removed
-	// workspaces).
+	// KnownRepos are extra source repos to scan for orphan dmux branches.
 	KnownRepos []string
 }
 
@@ -64,7 +62,8 @@ func (d *Doctor) Run(ctx context.Context) ([]Finding, error) {
 		}
 	}
 	out = append(out, d.checkHooks()...)
-	out = append(out, d.checkWorkspaces(ctx, st)...)
+	out = append(out, d.checkWorkspaces(st)...)
+	out = append(out, d.checkSessionWorktrees(ctx, st)...)
 	out = append(out, d.checkOrphanDirs(st)...)
 	out = append(out, d.checkOrphanBranches(ctx, st)...)
 	out = append(out, d.checkSessions(ctx, st)...)
@@ -102,213 +101,165 @@ func (d *Doctor) checkHooks() []Finding {
 	return nil
 }
 
-func (d *Doctor) checkWorkspaces(ctx context.Context, st *State) []Finding {
+// checkWorkspaces: a workspace stuck in deleting (rm interrupted after its
+// sessions were handled) and a missing root dir.
+func (d *Doctor) checkWorkspaces(st *State) []Finding {
 	var f []Finding
 	for _, ws := range st.Workspaces {
 		ws := ws
-		// Saga state.
-		switch ws.Status {
-		case WorkspaceCreating, WorkspaceFailed, WorkspaceDeleting:
-			f = append(f, d.stuckWorkspace(ctx, ws))
-		}
-		// Worktree registration for ready workspaces.
-		if ws.Status != WorkspaceReady {
+		if ws.Status == WorkspaceDeleting {
+			if len(st.SessionsIn(ws.ID)) == 0 {
+				f = append(f, Finding{Check: "saga", Severity: SevError, Subject: ws.Name, Message: "workspace removal was interrupted after its sessions were removed",
+					FixDesc: "remove the empty workspace dir and drop the record", Fix: func(ctx context.Context) error {
+						_ = os.Remove(ws.Root)
+						return d.Store.Update(ctx, func(st *State) error { st.removeWorkspace(ws.ID); return nil })
+					}})
+			} else {
+				f = append(f, Finding{Check: "saga", Severity: SevError, Subject: ws.Name, Message: "workspace is stuck in status deleting with sessions remaining",
+					Advice: "finish with `dmux workspace rm " + ws.Name + "` (add --stop/--discard as it tells you)"})
+			}
 			continue
 		}
-		for _, repo := range ws.Repos {
-			rs := inspectRepo(ctx, d.Git, repo)
-			switch {
-			case rs.Err != nil:
-				f = append(f, Finding{Check: "worktree", Severity: SevWarn, Subject: ws.Name + "/" + repo.Name, Message: rs.Err.Error()})
-			case rs.Missing:
-				f = append(f, Finding{Check: "worktree", Severity: SevError, Subject: ws.Name + "/" + repo.Name,
-					Message: fmt.Sprintf("worktree %s is no longer registered in %s", repo.WorktreePath, repo.SourcePath),
-					Advice:  "if you removed it on purpose, `dmux workspace rm " + ws.Name + "`; otherwise re-create with `git -C " + repo.SourcePath + " worktree add " + repo.WorktreePath + " " + repo.Branch + "`"})
-			}
-		}
-		if _, err := os.Stat(ws.Root); errors.Is(err, os.ErrNotExist) {
-			f = append(f, Finding{Check: "workspace", Severity: SevError, Subject: ws.Name, Message: "root directory " + ws.Root + " is missing",
-				Advice: "`dmux workspace rm " + ws.Name + "` to drop the record (git worktree entries will be pruned)"})
+		if _, err := os.Stat(ws.Root); errors.Is(err, os.ErrNotExist) && len(st.SessionsIn(ws.ID)) > 0 {
+			f = append(f, Finding{Check: "workspace", Severity: SevError, Subject: ws.Name, Message: "root directory " + ws.Root + " is missing but sessions are recorded",
+				Advice: "`dmux workspace rm " + ws.Name + "` to drop the records (git worktree entries will be pruned)"})
 		}
 	}
 	return f
 }
 
-// stuckWorkspace handles creating/failed/deleting. The safe fix finishes
-// the rollback only when every remaining worktree is clean; otherwise it
-// advises the explicit command.
-func (d *Doctor) stuckWorkspace(ctx context.Context, ws Workspace) Finding {
-	fd := Finding{Check: "saga", Severity: SevError, Subject: ws.Name, Message: fmt.Sprintf("workspace is stuck in status %q", ws.Status)}
+// checkSessionWorktrees: sessions stuck mid-saga, and ready sessions whose
+// worktrees git no longer registers.
+func (d *Doctor) checkSessionWorktrees(ctx context.Context, st *State) []Finding {
+	var f []Finding
+	for _, s := range st.Sessions {
+		s := s
+		if !s.OwnsWorktrees() {
+			continue
+		}
+		switch s.Status {
+		case WorkspaceCreating, WorkspaceFailed, WorkspaceDeleting:
+			f = append(f, d.stuckSession(ctx, st, s))
+			continue
+		}
+		for _, repo := range s.Repos {
+			rs := inspectRepo(ctx, d.Git, repo)
+			switch {
+			case rs.Err != nil:
+				f = append(f, Finding{Check: "worktree", Severity: SevWarn, Subject: s.ID + "/" + repo.Name, Message: rs.Err.Error()})
+			case rs.Missing:
+				f = append(f, Finding{Check: "worktree", Severity: SevError, Subject: s.ID + "/" + repo.Name,
+					Message: fmt.Sprintf("worktree %s is no longer registered in %s", repo.WorktreePath, repo.SourcePath),
+					Advice:  "if you removed it on purpose, `dmux rm " + s.ID + "`; otherwise re-create with `git -C " + repo.SourcePath + " worktree add " + repo.WorktreePath + " " + repo.Branch + "`"})
+			}
+		}
+	}
+	return f
+}
+
+// stuckSession handles creating/failed/deleting sessions. The safe fix
+// finishes the rollback only when every remaining worktree is clean and no
+// other session shares them; otherwise it advises the explicit command.
+func (d *Doctor) stuckSession(ctx context.Context, st *State, s Session) Finding {
+	fd := Finding{Check: "saga", Severity: SevError, Subject: s.ID, Message: fmt.Sprintf("session is stuck in status %q", s.Status)}
 	unsafe := false
-	for _, repo := range ws.Repos {
-		rs := inspectRepo(ctx, d.Git, repo)
-		if !rs.Missing && !rs.Clean() {
+	for _, repo := range s.Repos {
+		if rs := inspectRepo(ctx, d.Git, repo); !rs.Missing && !rs.Clean() {
 			unsafe = true
 		}
 	}
-	if unsafe {
-		fd.Advice = "worktrees contain work; inspect with `dmux workspace status " + ws.Name + "`, then `dmux workspace rm " + ws.Name + " --discard` to finish removal, or fix by hand and edit state"
+	if unsafe || len(st.Joiners(s.ID)) > 0 {
+		fd.Advice = "worktrees contain work or are shared; inspect with `dmux session status " + s.ID + "`, then `dmux rm " + s.ID + " --discard` to finish removal"
 		return fd
 	}
 	fd.FixDesc = "remove remaining clean worktrees, delete dmux-created branches, drop the record"
 	fd.Fix = func(ctx context.Context) error {
-		for i := len(ws.Repos) - 1; i >= 0; i-- {
-			repo := ws.Repos[i]
-			rs := inspectRepo(ctx, d.Git, repo)
-			if rs.Locked {
+		for _, repo := range s.Repos {
+			if inspectRepo(ctx, d.Git, repo).Locked {
 				return fmt.Errorf("%s is locked; unlock it first", repo.WorktreePath)
 			}
-			if !rs.Missing {
-				if err := d.Git.WorktreeRemove(ctx, repo.SourcePath, repo.WorktreePath, false); err != nil {
-					return err
-				}
-			}
-			if repo.CreatedBranch {
-				_ = d.Git.BranchDeleteSafe(ctx, repo.SourcePath, repo.Branch) // refuses unmerged; fine
-			}
+		}
+		if err := rollbackWorktrees(ctx, d.Git, s.Root, s.Repos); err != nil {
+			return err
+		}
+		for _, repo := range s.Repos {
 			_ = d.Git.WorktreePrune(ctx, repo.SourcePath)
 		}
-		_ = os.Remove(filepath.Join(ws.Root, "AGENTS.md"))
-		_ = os.Remove(ws.Root)
-		return d.Store.Update(ctx, func(st *State) error {
-			kept := st.Sessions[:0]
-			for _, s := range st.Sessions {
-				if s.WorkspaceID != ws.ID {
-					kept = append(kept, s)
-				}
-			}
-			st.Sessions = kept
-			for i := range st.Workspaces {
-				if st.Workspaces[i].ID == ws.ID {
-					st.Workspaces = append(st.Workspaces[:i], st.Workspaces[i+1:]...)
-					break
-				}
-			}
-			return nil
-		})
+		return d.Store.Update(ctx, func(st *State) error { st.removeSession(s.ID); return nil })
 	}
 	return fd
 }
 
-// checkOrphanDirs finds directories under the workspaces root that no
-// record references. Never deleted automatically: they may hold work.
+// checkOrphanDirs finds directories no record references: under the
+// workspaces root (not a workspace) and under each workspace root (not a
+// session). Never deleted automatically: they may hold work.
 func (d *Doctor) checkOrphanDirs(st *State) []Finding {
 	if d.WorkspacesRoot == "" {
-		return nil
-	}
-	entries, err := os.ReadDir(d.WorkspacesRoot)
-	if err != nil {
 		return nil
 	}
 	known := map[string]bool{}
 	for _, ws := range st.Workspaces {
 		known[filepath.Clean(ws.Root)] = true
 	}
+	for _, s := range st.Sessions {
+		known[filepath.Clean(s.Root)] = true
+		for _, r := range s.Repos {
+			known[filepath.Clean(r.WorktreePath)] = true // v1-migrated sessions keep worktrees directly under the workspace root
+		}
+	}
 	var f []Finding
+	report := func(p string) {
+		f = append(f, Finding{Check: "orphan", Severity: SevWarn, Subject: p, Message: "directory is not referenced by any workspace or session record",
+			Advice: "inspect it; if it holds git worktrees, remove them with `git worktree remove` from their source repos, then delete the directory"})
+	}
+	entries, err := os.ReadDir(d.WorkspacesRoot)
+	if err != nil {
+		return nil
+	}
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		p := filepath.Join(d.WorkspacesRoot, e.Name())
 		if !known[filepath.Clean(p)] {
-			f = append(f, Finding{Check: "orphan", Severity: SevWarn, Subject: p, Message: "directory is not referenced by any workspace record",
-				Advice: "inspect it; if it holds git worktrees, remove them with `git worktree remove` from their source repos, then delete the directory"})
-		}
-	}
-	return f
-}
-
-// checkSessions reports sessions whose tmux window is dead or missing.
-// The safe fix closes dead (held) windows only; records are kept because
-// they enable `dmux resume`.
-func (d *Doctor) checkSessions(ctx context.Context, st *State) []Finding {
-	if d.Tmux == nil {
-		return nil
-	}
-	wins, err := d.Tmux.ListWindows(ctx)
-	if err != nil {
-		return nil // tools check already reports tmux problems
-	}
-	byTag := map[string]TmuxWindow{}
-	for _, w := range wins {
-		if w.DmuxSession != "" {
-			byTag[w.DmuxSession] = w
-		}
-	}
-	var f []Finding
-	for _, s := range st.Sessions {
-		s := s
-		if st.Workspace(s.WorkspaceID) == nil {
-			f = append(f, Finding{Check: "session", Severity: SevWarn, Subject: s.ID, Message: "session references unknown workspace " + s.WorkspaceID,
-				FixDesc: "drop the orphan session record", Fix: func(ctx context.Context) error {
-					return d.Store.Update(ctx, func(st *State) error {
-						for i := range st.Sessions {
-							if st.Sessions[i].ID == s.ID {
-								st.Sessions = append(st.Sessions[:i], st.Sessions[i+1:]...)
-								break
-							}
-						}
-						return nil
-					})
-				}})
+			report(p)
 			continue
 		}
-		w, ok := byTag[s.ID]
-		exited := false
-		if d.Events != nil {
-			if evs, err := d.Events.Read(s.ID); err == nil {
-				lc := Reduce(evs).Lifecycle
-				exited = lc == LifecycleExited || lc == LifecycleFailed
-			}
+		subs, err := os.ReadDir(p)
+		if err != nil {
+			continue
 		}
-		switch {
-		case ok && w.WindowID == s.Tmux.WindowID && (w.PaneDead || exited):
-			wid := w.WindowID
-			f = append(f, Finding{Check: "session", Severity: SevInfo, Subject: s.ID, Message: "process exited; tmux window " + wid + " is still open",
-				FixDesc: "close the window (record kept for `dmux resume`)", Fix: func(ctx context.Context) error { return d.Tmux.KillWindow(ctx, wid) }})
-		case !ok || w.WindowID != s.Tmux.WindowID:
-			msg := "no tmux window; session is not running"
-			if s.DevinSessionID != "" {
-				f = append(f, Finding{Check: "session", Severity: SevInfo, Subject: s.ID, Message: msg, Advice: "`dmux resume " + s.ID + "` to continue it"})
-			} else {
-				f = append(f, Finding{Check: "session", Severity: SevWarn, Subject: s.ID, Message: msg + " and no Devin conversation id was recorded", Advice: "it cannot be resumed; `dmux init` ensures future sessions record it"})
+		for _, se := range subs {
+			if !se.IsDir() {
+				continue
+			}
+			sp := filepath.Join(p, se.Name())
+			if !known[filepath.Clean(sp)] {
+				report(sp)
 			}
 		}
 	}
 	return f
 }
 
-// Summarize renders findings compactly for the CLI.
-func Summarize(findings []Finding) string {
-	if len(findings) == 0 {
-		return "No problems found."
-	}
-	var b strings.Builder
-	for _, f := range findings {
-		fmt.Fprintf(&b, "[%-5s] %-9s %s: %s\n", f.Severity, f.Check, f.Subject, f.Message)
-		if f.Fix != nil {
-			fmt.Fprintf(&b, "        fix: %s (run with --fix)\n", f.FixDesc)
-		} else if f.Advice != "" {
-			fmt.Fprintf(&b, "        %s\n", f.Advice)
-		}
-	}
-	return b.String()
-}
-
-// checkOrphanBranches reports dmux/* branches in source repos that no
-// workspace references. They are left behind by `workspace rm` without
-// --delete-branches (the default, since a branch is often the deliverable)
-// and block re-creating a workspace of the same name. Never deleted
+// checkOrphanBranches reports dmux/* branches in known source repos that no
+// session uses. They are left behind by `rm` without --delete-branches
+// (the default, since a branch is often the deliverable). Never deleted
 // automatically; the finding carries the exact `git branch -d` command,
 // which itself refuses unmerged branches.
 func (d *Doctor) checkOrphanBranches(ctx context.Context, st *State) []Finding {
 	if d.Git == nil {
 		return nil
 	}
-	inUse := map[string]bool{} // repo + branch
+	inUse := map[string]bool{}
 	repos := map[string]bool{}
 	for _, ws := range st.Workspaces {
 		for _, r := range ws.Repos {
+			repos[r.SourcePath] = true
+		}
+	}
+	for _, s := range st.Sessions {
+		for _, r := range s.Repos {
 			repos[r.SourcePath] = true
 			inUse[r.SourcePath+"\x00"+r.Branch] = true
 		}
@@ -332,9 +283,91 @@ func (d *Doctor) checkOrphanBranches(ctx context.Context, st *State) []Finding {
 			continue
 		}
 		sort.Strings(orphans)
+		advice := fmt.Sprintf("if their work is merged or unwanted: git -C %s branch -d %s   (refuses unmerged branches; they may also be the branches you meant to keep)", repo, strings.Join(orphans, " "))
+		for _, b := range orphans {
+			if strings.Count(b, "/") == 1 { // v1 naming dmux/<ws>: blocks dmux/<ws>/<slug>
+				advice += fmt.Sprintf("; note %s blocks new session branches %s/* until renamed (git -C %s branch -m %s %s-v1) or deleted", b, b, repo, b, b)
+			}
+		}
 		f = append(f, Finding{Check: "branch", Severity: SevInfo, Subject: repo,
-			Message: fmt.Sprintf("%d dmux branch(es) not used by any workspace: %s", len(orphans), strings.Join(orphans, ", ")),
-			Advice:  fmt.Sprintf("if their work is merged or unwanted: git -C %s branch -d %s   (refuses unmerged branches; they may also be the branches you meant to keep)", repo, strings.Join(orphans, " "))})
+			Message: fmt.Sprintf("%d dmux branch(es) not used by any session: %s", len(orphans), strings.Join(orphans, ", ")),
+			Advice:  advice})
+	}
+	sort.Slice(f, func(i, j int) bool { return f[i].Subject < f[j].Subject })
+	return f
+}
+
+// checkSessions reports sessions whose tmux window is dead or missing, and
+// records pointing at nothing.
+func (d *Doctor) checkSessions(ctx context.Context, st *State) []Finding {
+	if d.Tmux == nil {
+		return nil
+	}
+	wins, err := d.Tmux.ListWindows(ctx)
+	if err != nil {
+		return nil // tools check already reports tmux problems
+	}
+	byTag := map[string]TmuxWindow{}
+	for _, w := range wins {
+		if w.DmuxSession != "" {
+			byTag[w.DmuxSession] = w
+		}
+	}
+	var f []Finding
+	for _, s := range st.Sessions {
+		s := s
+		if st.Workspace(s.WorkspaceID) == nil {
+			f = append(f, Finding{Check: "session", Severity: SevWarn, Subject: s.ID, Message: "session references unknown workspace " + s.WorkspaceID,
+				FixDesc: "drop the orphan session record", Fix: func(ctx context.Context) error {
+					return d.Store.Update(ctx, func(st *State) error { st.removeSession(s.ID); return nil })
+				}})
+			continue
+		}
+		if !s.OwnsWorktrees() && st.Session(s.SharedWith) == nil {
+			f = append(f, Finding{Check: "session", Severity: SevWarn, Subject: s.ID, Message: "session shares worktrees of " + s.SharedWith + ", which no longer exists",
+				Advice: "`dmux rm " + s.ID + "` (its worktrees were owned by the removed session)"})
+		}
+		if s.Status != WorkspaceReady {
+			continue // saga check covers it
+		}
+		w, ok := byTag[s.ID]
+		exited := false
+		if d.Events != nil {
+			if evs, err := d.Events.Read(s.ID); err == nil {
+				lc := Reduce(evs).Lifecycle
+				exited = lc == LifecycleExited || lc == LifecycleFailed
+			}
+		}
+		switch {
+		case ok && w.WindowID == s.Tmux.WindowID && (w.PaneDead || exited):
+			wid := w.WindowID
+			f = append(f, Finding{Check: "session", Severity: SevInfo, Subject: s.ID, Message: "process exited; tmux window " + wid + " is still open",
+				FixDesc: "close the window (record kept for `dmux resume`)", Fix: func(ctx context.Context) error { return d.Tmux.KillWindow(ctx, wid) }})
+		case !ok || w.WindowID != s.Tmux.WindowID:
+			msg := "no tmux window; session is not running"
+			if s.DevinSessionID != "" {
+				f = append(f, Finding{Check: "session", Severity: SevInfo, Subject: s.ID, Message: msg, Advice: "`dmux resume " + s.ID + "` to continue it, or `dmux rm " + s.ID + "` to remove its worktrees"})
+			} else if s.Tmux.WindowID != "" {
+				f = append(f, Finding{Check: "session", Severity: SevWarn, Subject: s.ID, Message: msg + " and no Devin conversation id was recorded", Advice: "it cannot be resumed; `dmux rm " + s.ID + "` when its worktrees are no longer needed"})
+			}
+		}
 	}
 	return f
+}
+
+// Summarize renders findings compactly for the CLI.
+func Summarize(findings []Finding) string {
+	if len(findings) == 0 {
+		return "No problems found."
+	}
+	var b strings.Builder
+	for _, f := range findings {
+		fmt.Fprintf(&b, "[%-5s] %-9s %s: %s\n", f.Severity, f.Check, f.Subject, f.Message)
+		if f.Fix != nil {
+			fmt.Fprintf(&b, "        fix: %s (run with --fix)\n", f.FixDesc)
+		} else if f.Advice != "" {
+			fmt.Fprintf(&b, "        %s\n", f.Advice)
+		}
+	}
+	return b.String()
 }

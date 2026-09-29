@@ -54,8 +54,16 @@ func (m *WorkspaceManager) Rename(ctx context.Context, tmux Tmux, query, newName
 		return &res, nil
 	}
 
-	if err := os.WriteFile(filepath.Join(res.Workspace.Root, "AGENTS.md"), []byte(WorkspaceAgentsMD(&res.Workspace)), 0o644); err != nil {
-		res.Warnings = append(res.Warnings, "could not regenerate AGENTS.md: "+err.Error())
+	if st, err := m.Store.Read(); err == nil {
+		for _, s := range st.SessionsIn(res.Workspace.ID) {
+			if !s.OwnsWorktrees() || s.Root == "" {
+				continue
+			}
+			s := s
+			if err := os.WriteFile(filepath.Join(s.Root, "AGENTS.md"), []byte(SessionAgentsMD(&res.Workspace, &s)), 0o644); err != nil {
+				res.Warnings = append(res.Warnings, "could not regenerate AGENTS.md for "+s.ID+": "+err.Error())
+			}
+		}
 	}
 	if tmux != nil {
 		if wins, err := tmux.ListWindows(ctx); err == nil {

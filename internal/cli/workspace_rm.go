@@ -22,12 +22,13 @@ func newWorkspaceRmCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "rm <workspace>",
 		Aliases: []string{"remove", "delete"},
-		Short:   "Remove a workspace: its worktrees, tmux windows, and records",
-		Long: `Remove a workspace. Safe by default: it refuses while any session is running
-(--stop ends them), refuses if any repo has uncommitted changes or unmerged
-commits (--discard loses them), and never removes a worktree that is locked with
-"git worktree lock". Branches are kept unless --delete-branches, and even then
-only branches dmux created are deleted, and only if fully merged.
+		Short:   "Remove a workspace and every session in it: worktrees, tmux windows, records",
+		Long: `Remove a workspace and all its sessions. Safe by default: it refuses while any
+session is running (--stop ends them), refuses if any session's worktrees have
+uncommitted changes or unmerged commits (--discard loses them), and never
+removes a worktree that is locked with "git worktree lock". Branches are kept
+unless --delete-branches, and even then only branches dmux created are deleted,
+and only if fully merged. To remove one session: "dmux rm <session>".
 
 Devin's conversation history is not touched; the conversation ids are printed
 so you can still "devin -r <id>" them by hand.`,
@@ -58,24 +59,7 @@ so you can still "devin -r <id>" them by hand.`,
 			if err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "Removed workspace %s\n", res.Workspace.Name)
-			if len(res.StoppedSessions) > 0 {
-				fmt.Fprintf(out, "  stopped sessions: %s\n", strings.Join(res.StoppedSessions, ", "))
-			}
-			fmt.Fprintf(out, "  removed worktrees: %s\n", strings.Join(res.RemovedRepos, ", "))
-			if len(res.DeletedBranches) > 0 {
-				fmt.Fprintf(out, "  deleted branches:  %s\n", strings.Join(res.DeletedBranches, ", "))
-			}
-			if len(res.KeptBranches) > 0 {
-				fmt.Fprintf(out, "  kept branches:     %s\n", strings.Join(res.KeptBranches, ", "))
-			}
-			if len(res.DevinSessionIDs) > 0 {
-				fmt.Fprintf(out, "  Devin conversations kept (resume by hand): %s\n", strings.Join(res.DevinSessionIDs, ", "))
-			}
-			for _, w := range res.Warnings {
-				fmt.Fprintf(out, "  warning: %s\n", w)
-			}
+			printRemoveResult(cmd.OutOrStdout(), res)
 			return nil
 		},
 	}
