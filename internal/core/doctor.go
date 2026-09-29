@@ -41,6 +41,9 @@ type Doctor struct {
 	WorkspacesRoot string
 	// HooksInstalled reports whether Devin's config has dmux's hook; nil skips the check.
 	HooksInstalled func() (bool, error)
+	// BinaryOnPath, if set, reports whether `dmux` resolves on PATH to the
+	// running binary, plus the fix to suggest when it does not.
+	BinaryOnPath func() (ok bool, advice string)
 }
 
 // Run executes every check and returns findings sorted by severity.
@@ -51,6 +54,11 @@ func (d *Doctor) Run(ctx context.Context) ([]Finding, error) {
 	}
 	var out []Finding
 	out = append(out, d.checkTools(ctx)...)
+	if d.BinaryOnPath != nil {
+		if ok, advice := d.BinaryOnPath(); !ok {
+			out = append(out, Finding{Check: "path", Severity: SevWarn, Subject: "dmux", Message: "`dmux` does not resolve on PATH to this binary", Advice: advice})
+		}
+	}
 	out = append(out, d.checkHooks()...)
 	out = append(out, d.checkWorkspaces(ctx, st)...)
 	out = append(out, d.checkOrphanDirs(st)...)

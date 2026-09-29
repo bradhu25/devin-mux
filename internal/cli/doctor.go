@@ -39,6 +39,7 @@ those it tells you the explicit command.`,
 				Store: a.store, Git: a.git, Tmux: a.tmux, Devin: a.devin, Events: state.EventLog{},
 				WorkspacesRoot: filepath.Join(a.store.Dir(), "workspaces"),
 				HooksInstalled: func() (bool, error) { return hooksInstalled(a.sessions.DmuxBin) },
+				BinaryOnPath:   func() (bool, string) { return binaryOnPath(a.sessions.DmuxBin) },
 			}
 			fs, err := d.Run(cmd.Context())
 			if err != nil {

@@ -9,6 +9,20 @@ build:
 
 install:
 	go install -ldflags '$(LDFLAGS)' ./cmd/dmux
+	@bindir="$$(go env GOBIN)"; [ -n "$$bindir" ] || bindir="$$(go env GOPATH)/bin"; \
+	echo "installed $$bindir/dmux"; \
+	if command -v dmux >/dev/null 2>&1 && [ "$$(command -v dmux)" = "$$bindir/dmux" ]; then \
+		echo "dmux is on PATH; run: dmux init && dmux doctor"; \
+	elif command -v dmux >/dev/null 2>&1; then \
+		echo "WARNING: 'dmux' on PATH is $$(command -v dmux), not the one just installed. Remove the stale copy or reorder PATH."; \
+	else \
+		echo "WARNING: $$bindir is not on PATH. Add it, then open a new terminal:"; \
+		case "$$(basename "$${SHELL:-sh}")" in \
+			zsh)  echo "  echo 'export PATH=\"$$bindir:\$$PATH\"' >> ~/.zshrc" ;; \
+			fish) echo "  fish_add_path $$bindir" ;; \
+			*)    echo "  echo 'export PATH=\"$$bindir:\$$PATH\"' >> ~/.bash_profile   # login shells read this, not ~/.bashrc" ;; \
+		esac; \
+	fi
 
 test:
 	go test -race ./...

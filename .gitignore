@@ -1,5 +1,6 @@
 /bin/
 /dist/
+/dmux
 *.test
 *.out
 .DS_Store

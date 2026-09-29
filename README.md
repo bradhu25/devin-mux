@@ -42,16 +42,28 @@ not built. Everything below works today, from the terminal, with no UI.
 ```bash
 git clone https://github.com/bradhu25/devin-mux
 cd devin-mux
-make install          # go install -> $(go env GOPATH)/bin/dmux
+make install          # go install -> $(go env GOPATH)/bin/dmux, then checks PATH
 dmux init             # register the status hook in ~/.config/devin/config.json
 dmux doctor           # everything should read "No problems found."
 ```
 
-Make sure `$(go env GOPATH)/bin` is on your `PATH`. `dmux init` edits Devin's
-user config: it appends its own hook entries, leaves everything else exactly as
-it was, and writes a timestamped backup next to the file. Re-run it whenever you
-rebuild or move the binary (hooks point at an absolute path; `dmux doctor` will
-tell you). `dmux init --uninstall` removes the entries again.
+**PATH.** `go install` puts the binary in `$(go env GOPATH)/bin` (usually
+`~/go/bin`), which is often *not* on your `PATH`. `make install` checks and
+prints the exact line to add for your shell. One macOS gotcha: terminals open
+*login* shells, and login bash reads `~/.bash_profile`, not `~/.bashrc` — a PATH
+line in the wrong file is why a tool can work in one terminal and not another.
+`dmux doctor` also reports when `dmux` on PATH is missing or is a stale copy
+that shadows the build you're running.
+
+**Hooks.** `dmux init` edits Devin's user config: it appends its own hook
+entries, leaves everything else exactly as it was, and writes a timestamped
+backup next to the file. The entries point at the binary's absolute path, so
+re-run `dmux init` after building to a new location (`dmux doctor` will tell
+you). `dmux init --uninstall` removes the entries again.
+
+Developing on dmux itself? Use `make build` and put a symlink on PATH once
+(`ln -s "$PWD/bin/dmux" ~/.local/bin/dmux`) so every rebuild is picked up
+without copying binaries around.
 
 The hook is passive and cheap (~10 ms). It only records events for sessions
 dmux started; your other Devin sessions are ignored.
