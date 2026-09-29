@@ -103,6 +103,8 @@ type Tmux interface {
 	// RenameSession renames a tmux session by $N id (display only; ids are
 	// unaffected).
 	RenameSession(ctx context.Context, sessionID, name string) error
+	// RenameWindow renames a tmux window by @N id (display only).
+	RenameWindow(ctx context.Context, windowID, name string) error
 	// InsideTmux reports whether the current process runs inside a tmux
 	// client ($TMUX set).
 	InsideTmux() bool

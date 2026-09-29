@@ -94,9 +94,10 @@ Wherever a command takes a `<session>`, you can pass the session id
 case-insensitive (`auth`). It must match exactly one session; if it's
 ambiguous, dmux lists the candidates. Ids come from `dmux spawn`'s output and
 the `SESSION` column of `dmux ls`; in practice the task text is what you'll
-type. `-t` is optional on `spawn` — without it Devin opens at an empty prompt —
-but a short task makes the session findable, so give one even if you plan to
-type the real request yourself.
+type. `-t` is optional on `spawn`: without it Devin opens at an empty prompt,
+and the **first prompt you type becomes the session's task** (in `dmux ls`, in
+queries, and as the tmux window name). Give `-t` when you want a label that
+differs from the prompt.
 
 ### Reading `dmux ls`
 

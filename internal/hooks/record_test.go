@@ -79,6 +79,46 @@ func TestRecord_SessionStartCapturesDevinSessionID(t *testing.T) {
 	}
 }
 
+// A session spawned without -t adopts the first prompt as its task; a
+// session that already has one keeps it.
+func TestRecord_FirstPromptBecomesTask(t *testing.T) {
+	t.Setenv(state.EnvRoot, t.TempDir())
+	store, _ := state.OpenDefault()
+	_ = store.Update(context.Background(), func(st *core.State) error {
+		st.Sessions = append(st.Sessions,
+			core.Session{ID: "s_notask", WorkspaceID: "ws_1", Tmux: core.TmuxTarget{WindowID: "@7"}},
+			core.Session{ID: "s_hastask", WorkspaceID: "ws_1", Task: "given up front", Tmux: core.TmuxTarget{WindowID: "@8"}})
+		return nil
+	})
+	renamed := map[string]string{}
+	r := &Recorder{Store: store, RenameWindow: func(w, n string) error { renamed[w] = n; return nil }}
+
+	first := `{"hook_event_name":"UserPromptSubmit","prompt":"Fix the auth bug in api/ please","session_id":"olive-turkey","prompt_id":"p1"}`
+	second := `{"hook_event_name":"UserPromptSubmit","prompt":"now add tests","session_id":"olive-turkey","prompt_id":"p2"}`
+	for _, p := range []string{first, second} {
+		if err := r.Record(Input{DmuxSessionID: "s_notask", Payload: []byte(p)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.Record(Input{DmuxSessionID: "s_hastask", Payload: []byte(first)}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := store.Read()
+	if got := st.Session("s_notask").Task; got != "Fix the auth bug in api/ please" {
+		t.Fatalf("first prompt should become the task, and the second must not replace it: %q", got)
+	}
+	if got := st.Session("s_hastask").Task; got != "given up front" {
+		t.Fatalf("an existing task must never be overwritten: %q", got)
+	}
+	if renamed["@7"] != core.WindowName("Fix the auth bug in api/ please", "s_notask") || renamed["@8"] != "" {
+		t.Fatalf("window rename: %v", renamed)
+	}
+	// Both prompts were still logged as events.
+	if n := len(readEvents(t, "s_notask")); n != 2 {
+		t.Fatalf("events: %d", n)
+	}
+}
+
 func TestRecord_UnknownHookKeptAsRaw(t *testing.T) {
 	t.Setenv(state.EnvRoot, t.TempDir())
 	r := &Recorder{}

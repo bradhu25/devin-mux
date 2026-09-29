@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"context"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	tmuxadapter "github.com/bradhu25/devin-mux/internal/adapters/tmux"
 	"github.com/bradhu25/devin-mux/internal/hooks"
 	"github.com/bradhu25/devin-mux/internal/state"
 )
@@ -25,6 +28,12 @@ func newHookEventCmd() *cobra.Command {
 			rec := &hooks.Recorder{}
 			if store, err := state.OpenDefault(); err == nil {
 				rec.Store = store
+			}
+			tm := &tmuxadapter.Adapter{Socket: os.Getenv(EnvTmuxSocket)}
+			rec.RenameWindow = func(windowID, name string) error {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				return tm.RenameWindow(ctx, windowID, name)
 			}
 			_ = rec.Record(hooks.Input{
 				DmuxSessionID: os.Getenv("DMUX_SESSION_ID"),

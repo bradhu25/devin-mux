@@ -238,6 +238,14 @@ func (a *Adapter) RenameSession(ctx context.Context, sessionID, name string) err
 	return err
 }
 
+func (a *Adapter) RenameWindow(ctx context.Context, windowID, name string) error {
+	if !strings.HasPrefix(windowID, "@") {
+		return fmt.Errorf("RenameWindow: %q is not a window id", windowID)
+	}
+	_, err := a.run(ctx, "rename-window", "-t", windowID, name)
+	return err
+}
+
 func (a *Adapter) InsideTmux() bool {
 	lookup := a.LookupEnv
 	if lookup == nil {

@@ -26,14 +26,19 @@ type Input struct {
 // dmux did not spawn (no DMUX_SESSION_ID). They are ignored by design.
 var ErrNotManaged = errors.New("hook event from a session not managed by dmux")
 
-// Recorder writes normalized events and, on SessionStart, captures the
-// Devin session id into the Session record so `dmux resume` can use it.
+// Recorder writes normalized events and enriches the Session record from
+// them: on SessionStart it captures the Devin session id (for `dmux
+// resume`); on the first UserPromptSubmit of a session spawned without -t it
+// adopts the prompt as the session's task.
 type Recorder struct {
-	// Store may be nil (then devinSessionId capture is skipped).
+	// Store may be nil (then record enrichment is skipped).
 	Store core.Store
 	// StoreTimeout bounds the state update; the hook must not stall Devin
 	// behind a slow lock. Defaults to 500ms.
 	StoreTimeout time.Duration
+	// RenameWindow, if set, renames the session's tmux window when a task
+	// is adopted. Best effort.
+	RenameWindow func(windowID, name string) error
 	Now          func() time.Time
 }
 
@@ -64,10 +69,45 @@ func (r *Recorder) Record(in Input) error {
 	if err := state.AppendSessionEvent(ev); err != nil {
 		return err
 	}
-	if ev.Type == core.SessionStarted && ev.DevinSessionID != "" && r.Store != nil {
-		r.captureDevinSessionID(ev.SessionID, ev.DevinSessionID)
+	if r.Store != nil {
+		switch {
+		case ev.Type == core.SessionStarted && ev.DevinSessionID != "":
+			r.captureDevinSessionID(ev.SessionID, ev.DevinSessionID)
+		case ev.Type == core.PromptSubmitted:
+			if prompt, _ := ev.Data["prompt"].(string); prompt != "" {
+				r.adoptTask(ev.SessionID, prompt)
+			}
+		}
 	}
 	return nil
+}
+
+// adoptTask fills an empty Session.Task with the first prompt the user
+// typed, so sessions spawned without -t become findable by task text. It
+// never overwrites a task that was given or already adopted.
+func (r *Recorder) adoptTask(sessionID, prompt string) {
+	timeout := r.StoreTimeout
+	if timeout == 0 {
+		timeout = 500 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	var windowID string
+	err := r.Store.Update(ctx, func(st *core.State) error {
+		s := st.Session(sessionID)
+		if s == nil {
+			return errors.New("unknown session")
+		}
+		if s.Task != "" {
+			return errors.New("task already set") // skip the write
+		}
+		s.Task = prompt
+		windowID = s.Tmux.WindowID
+		return nil
+	})
+	if err == nil && windowID != "" && r.RenameWindow != nil {
+		_ = r.RenameWindow(windowID, core.WindowName(prompt, sessionID))
+	}
 }
 
 // captureDevinSessionID is best-effort: a failure here only means resume

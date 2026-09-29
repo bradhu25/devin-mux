@@ -35,6 +35,7 @@ func (f *fakeTmux) KillWindow(_ context.Context, id string) error {
 	return nil
 }
 func (f *fakeTmux) RenameSession(context.Context, string, string) error { return nil }
+func (f *fakeTmux) RenameWindow(context.Context, string, string) error  { return nil }
 func (f *fakeTmux) InsideTmux() bool                                    { return f.inside }
 func (f *fakeTmux) SwitchClient(_ context.Context, t TmuxTarget) error {
 	f.switched = append(f.switched, t)
