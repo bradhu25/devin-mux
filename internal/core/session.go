@@ -22,6 +22,9 @@ type SessionManager struct {
 	Tmux  Tmux
 	Devin Devin
 	Store Store
+	// Proc and Events are required by Kill and Resume.
+	Proc   Proc
+	Events EventLog
 	// DmuxBin is the absolute path to the dmux binary, used to run the
 	// `dmux run` wrapper inside the tmux window.
 	DmuxBin string

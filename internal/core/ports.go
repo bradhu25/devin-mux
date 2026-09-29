@@ -137,6 +137,17 @@ type Devin interface {
 	ToolCallOutcomes(ctx context.Context, devinSessionID string, toolUseIDs []string) ([]ToolCallOutcome, error)
 }
 
+// Proc is the port for OS process control. dmux only ever signals pids it
+// obtained from tagged tmux panes it created.
+type Proc interface {
+	// Terminate sends SIGTERM to the process group led by pid.
+	Terminate(pid int) error
+	// Kill sends SIGKILL to the process group led by pid.
+	Kill(pid int) error
+	// Alive reports whether pid still exists.
+	Alive(pid int) bool
+}
+
 // EventLog is the port for reading a session's normalized events.
 type EventLog interface {
 	Read(sessionID string) ([]SessionEvent, error)

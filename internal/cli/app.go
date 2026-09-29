@@ -8,6 +8,7 @@ import (
 
 	devinadapter "github.com/bradhu25/devin-mux/internal/adapters/devin"
 	gitadapter "github.com/bradhu25/devin-mux/internal/adapters/git"
+	procadapter "github.com/bradhu25/devin-mux/internal/adapters/proc"
 	tmuxadapter "github.com/bradhu25/devin-mux/internal/adapters/tmux"
 	"github.com/bradhu25/devin-mux/internal/core"
 	"github.com/bradhu25/devin-mux/internal/state"
@@ -61,6 +62,8 @@ func (a *app) init() error {
 			Tmux:    a.tmux,
 			Devin:   a.devin,
 			Store:   st,
+			Proc:    procadapter.Adapter{},
+			Events:  state.EventLog{},
 			DmuxBin: self,
 		}
 		a.reconciler = &core.Reconciler{
