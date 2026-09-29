@@ -157,6 +157,55 @@ func TestKill_HeldPaneAfterExit(t *testing.T) {
 	}
 }
 
+func TestKillAll(t *testing.T) {
+	store := &fakeStore{state: State{
+		Workspaces: []Workspace{{ID: "ws_1", Name: "a", Status: WorkspaceReady}, {ID: "ws_2", Name: "b", Status: WorkspaceReady}},
+		Sessions: []Session{
+			{ID: "s_a1", WorkspaceID: "ws_1", Tmux: TmuxTarget{WindowID: "@1"}},
+			{ID: "s_a2", WorkspaceID: "ws_1", Tmux: TmuxTarget{WindowID: "@2"}},
+			{ID: "s_b1", WorkspaceID: "ws_2", Tmux: TmuxTarget{WindowID: "@3"}},
+			{ID: "s_gone", WorkspaceID: "ws_2", Tmux: TmuxTarget{WindowID: "@9"}}, // no window: skipped
+		},
+	}}
+	tm := &listingTmux{windows: []TmuxWindow{
+		{WindowID: "@1", DmuxSession: "s_a1", PanePID: 11}, {WindowID: "@2", DmuxSession: "s_a2", PanePID: 12}, {WindowID: "@3", DmuxSession: "s_b1", PanePID: 13},
+	}}
+	proc := &fakeProc{alive: map[int]bool{11: true, 12: true, 13: true}}
+	m := newSessionManager(store, &tm.fakeTmux)
+	m.Tmux, m.Proc, m.Events = tm, proc, &mutableEvents{byID: map[string][]SessionEvent{}}
+	opts := KillOptions{Grace: time.Second, Poll: 10 * time.Millisecond}
+
+	// One workspace only.
+	res, err := m.KillAll(context.Background(), "a", opts)
+	if err != nil || len(res) != 2 {
+		t.Fatalf("%v %+v", err, res)
+	}
+	for _, r := range res {
+		if r.Err != nil || r.Result.Method != "terminated" || r.Session.WorkspaceID != "ws_1" {
+			t.Fatalf("%+v", r)
+		}
+	}
+	if proc.Alive(13) != true {
+		t.Fatal("workspace b must be untouched")
+	}
+	// Everything remaining, concurrently (stubborn: each needs the full grace).
+	proc.stubborn = true
+	start := time.Now()
+	res, err = m.KillAll(context.Background(), "", opts)
+	if err != nil || len(res) != 1 || res[0].Session.ID != "s_b1" || res[0].Result.Method != "killed" {
+		t.Fatalf("%v %+v", err, res)
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Fatal("kills must run concurrently")
+	}
+	if len(store.state.Sessions) != 4 {
+		t.Fatal("records must be kept")
+	}
+	if _, err := m.KillAll(context.Background(), "nope", opts); !errors.Is(err, ErrWorkspaceNotFound) {
+		t.Fatal(err)
+	}
+}
+
 func TestKill_QueryResolution(t *testing.T) {
 	m, _, _, _ := killFixture(t, false)
 	if _, err := m.Kill(context.Background(), "auth", KillOptions{Grace: time.Second, Poll: 10 * time.Millisecond}); err != nil {

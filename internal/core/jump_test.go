@@ -4,16 +4,36 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 type listingTmux struct {
 	fakeTmux
+	mu      sync.Mutex
 	windows []TmuxWindow
 }
 
-func (l *listingTmux) ListWindows(context.Context) ([]TmuxWindow, error) { return l.windows, nil }
+func (l *listingTmux) ListWindows(context.Context) ([]TmuxWindow, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]TmuxWindow(nil), l.windows...), nil
+}
+
+// KillWindow removes the window from the listing, as real tmux does.
+func (l *listingTmux) KillWindow(ctx context.Context, id string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	kept := l.windows[:0]
+	for _, w := range l.windows {
+		if w.WindowID != id {
+			kept = append(kept, w)
+		}
+	}
+	l.windows = kept
+	return l.fakeTmux.KillWindow(ctx, id)
+}
 
 func jumpFixture() (*fakeStore, *listingTmux) {
 	t0 := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)

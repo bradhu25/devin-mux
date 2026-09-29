@@ -148,7 +148,7 @@ resumable.
 | `dmux spawn <workspace> [-t "task"] [--permission-mode m] [--model m]` | new session; `-t` is Devin's first prompt and the session's label; warns when others already share the workspace |
 | `dmux ls [-w] [-v]` | status board, once; `-w` refreshes every 2s; `-v` adds evidence and last message |
 | `dmux jump [<session>]` | picker when no argument; see [Naming sessions](#naming-sessions) |
-| `dmux kill <session> [--grace 5s]` | SIGTERM → wait → SIGKILL, close window; record kept |
+| `dmux kill <session> \| --all \| -w <workspace> [--grace 5s]` | SIGTERM → wait → SIGKILL, close window; record kept. `--all` / `--workspace` stop many at once, concurrently |
 | `dmux resume <session> [-t "prompt"]` | `devin -r <conversation>` in a new window, from the workspace root; `-t` is submitted on resume |
 | `dmux doctor [--fix]` | report problems; `--fix` applies only repairs that cannot lose work |
 

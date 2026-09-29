@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -103,6 +104,62 @@ func (m *SessionManager) Kill(ctx context.Context, query string, opts KillOption
 	}
 	res.WindowGone = true
 	return res, nil
+}
+
+// KillManyResult is one session's outcome within KillAll.
+type KillManyResult struct {
+	Session Session
+	Result  *KillResult
+	Err     error
+}
+
+// KillAll stops every session with a live tmux window, optionally limited to
+// one workspace (by name or id). Sessions are stopped concurrently so one
+// stubborn process's grace period does not delay the rest. Sessions that
+// are already exited are skipped, not reported. Records are kept.
+func (m *SessionManager) KillAll(ctx context.Context, workspaceQuery string, opts KillOptions) ([]KillManyResult, error) {
+	st, err := m.Store.Read()
+	if err != nil {
+		return nil, err
+	}
+	var ws *Workspace
+	if workspaceQuery != "" {
+		ws = st.WorkspaceByName(workspaceQuery)
+		if ws == nil {
+			ws = st.Workspace(workspaceQuery)
+		}
+		if ws == nil {
+			return nil, fmt.Errorf("%w: %s", ErrWorkspaceNotFound, workspaceQuery)
+		}
+	}
+	wins, err := m.Tmux.ListWindows(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list tmux windows: %w", err)
+	}
+	live := map[string]bool{}
+	for _, w := range wins {
+		if w.DmuxSession != "" {
+			live[w.DmuxSession] = true
+		}
+	}
+	var targets []Session
+	for _, s := range st.Sessions {
+		if live[s.ID] && (ws == nil || s.WorkspaceID == ws.ID) {
+			targets = append(targets, s)
+		}
+	}
+	results := make([]KillManyResult, len(targets))
+	var wg sync.WaitGroup
+	for i, s := range targets {
+		wg.Add(1)
+		go func(i int, s Session) {
+			defer wg.Done()
+			res, err := m.Kill(ctx, s.ID, opts)
+			results[i] = KillManyResult{Session: s, Result: res, Err: err}
+		}(i, s)
+	}
+	wg.Wait()
+	return results, nil
 }
 
 // waitExited polls until process_exited is recorded for the session or the
