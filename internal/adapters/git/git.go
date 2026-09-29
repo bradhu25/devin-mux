@@ -166,6 +166,20 @@ func (a *Adapter) BranchDeleteSafe(ctx context.Context, repo, branch string) err
 	return err
 }
 
+func (a *Adapter) ListBranches(ctx context.Context, repo, prefix string) ([]string, error) {
+	out, err := a.run(ctx, repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/"+prefix)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		if l != "" {
+			names = append(names, l)
+		}
+	}
+	return names, nil
+}
+
 func (a *Adapter) CommitsAhead(ctx context.Context, worktree, baseRef string) (int, error) {
 	out, err := a.run(ctx, worktree, "rev-list", "--count", baseRef+"..HEAD")
 	if err != nil {

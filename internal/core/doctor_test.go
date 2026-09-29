@@ -200,3 +200,35 @@ func TestDoctor_Sessions(t *testing.T) {
 		t.Fatal("doctor must not drop resumable session records")
 	}
 }
+
+// Branches left by `workspace rm` without --delete-branches are reported
+// (never deleted), including in repos whose workspaces are all gone.
+func TestDoctor_OrphanBranches(t *testing.T) {
+	f := newDoctorFixture(t)
+	// In-use branch (dmux/w) must not be reported; a leftover must.
+	f.git.repos["/src/api"]["dmux/old-feature"] = true
+	fs := findings(t, f.d)
+	br := byCheck(fs, "branch")
+	if len(br) != 1 || br[0].Fix != nil || !strings.Contains(br[0].Message, "dmux/old-feature") || strings.Contains(br[0].Message, "dmux/w") {
+		t.Fatalf("%s", Summarize(fs))
+	}
+	if !strings.Contains(br[0].Advice, "git -C /src/api branch -d dmux/old-feature") {
+		t.Fatalf("advice should carry the exact safe command: %q", br[0].Advice)
+	}
+	// Remove the workspace (branches kept, the default): the repo is still
+	// known, so the now-orphaned dmux/w is reported too.
+	sm := newSessionManager(f.store, &f.tm.fakeTmux)
+	sm.Tmux, sm.Proc, sm.Events = f.tm, &fakeProc{alive: map[int]bool{}}, &fakeEvents{}
+	if _, err := f.m.Remove(context.Background(), sm, "w", RemoveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	fs = findings(t, f.d)
+	br = byCheck(fs, "branch")
+	if len(br) != 2 {
+		t.Fatalf("want findings for both repos after rm: %s", Summarize(fs))
+	}
+	joined := br[0].Message + br[1].Message
+	if !strings.Contains(joined, "dmux/w") || !strings.Contains(joined, "dmux/old-feature") {
+		t.Fatalf("%s", Summarize(fs))
+	}
+}

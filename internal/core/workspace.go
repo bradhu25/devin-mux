@@ -141,7 +141,7 @@ func (m *WorkspaceManager) Create(ctx context.Context, in CreateWorkspaceInput) 
 				return nil, err
 			}
 			if exists {
-				return nil, fmt.Errorf("branch %q already exists in %s; pass --repo %s@%s to reuse it", branch, top, spec.Path, branch)
+				return nil, fmt.Errorf("branch %q already exists in %s (left over from an earlier workspace?); reuse it with --repo %s@%s, or delete it first with `git -C %s branch -d %s`", branch, top, spec.Path, branch, top, branch)
 			}
 			baseRef := in.BaseRef
 			if baseRef == "" {
@@ -213,6 +213,9 @@ func (m *WorkspaceManager) Create(ctx context.Context, in CreateWorkspaceInput) 
 	err = m.Store.Update(ctx, func(st *State) error {
 		if w := st.Workspace(ws.ID); w != nil {
 			w.Repos, w.Status = ws.Repos, WorkspaceReady
+			for _, r := range ws.Repos {
+				st.RememberRepo(r.SourcePath)
+			}
 		}
 		return nil
 	})

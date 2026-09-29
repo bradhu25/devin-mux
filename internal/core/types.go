@@ -133,6 +133,19 @@ type State struct {
 	Version    int         `json:"version"`
 	Workspaces []Workspace `json:"workspaces"`
 	Sessions   []Session   `json:"sessions"`
+	// KnownRepos are source repos any workspace has ever used, so doctor can
+	// find dmux/* branches left behind after the workspace is gone.
+	KnownRepos []string `json:"knownRepos,omitempty"`
+}
+
+// RememberRepo records a source repo path once.
+func (s *State) RememberRepo(path string) {
+	for _, p := range s.KnownRepos {
+		if p == path {
+			return
+		}
+	}
+	s.KnownRepos = append(s.KnownRepos, path)
 }
 
 // StateVersion is the current schema version of State.

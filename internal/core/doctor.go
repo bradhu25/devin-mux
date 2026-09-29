@@ -44,6 +44,10 @@ type Doctor struct {
 	// BinaryOnPath, if set, reports whether `dmux` resolves on PATH to the
 	// running binary, plus the fix to suggest when it does not.
 	BinaryOnPath func() (ok bool, advice string)
+	// KnownRepos are source repos to scan for orphan dmux branches even when
+	// no current workspace references them (e.g. remembered from removed
+	// workspaces).
+	KnownRepos []string
 }
 
 // Run executes every check and returns findings sorted by severity.
@@ -62,6 +66,7 @@ func (d *Doctor) Run(ctx context.Context) ([]Finding, error) {
 	out = append(out, d.checkHooks()...)
 	out = append(out, d.checkWorkspaces(ctx, st)...)
 	out = append(out, d.checkOrphanDirs(st)...)
+	out = append(out, d.checkOrphanBranches(ctx, st)...)
 	out = append(out, d.checkSessions(ctx, st)...)
 	rank := map[Severity]int{SevError: 0, SevWarn: 1, SevInfo: 2}
 	sort.SliceStable(out, func(i, j int) bool { return rank[out[i].Severity] < rank[out[j].Severity] })
@@ -288,4 +293,48 @@ func Summarize(findings []Finding) string {
 		}
 	}
 	return b.String()
+}
+
+// checkOrphanBranches reports dmux/* branches in source repos that no
+// workspace references. They are left behind by `workspace rm` without
+// --delete-branches (the default, since a branch is often the deliverable)
+// and block re-creating a workspace of the same name. Never deleted
+// automatically; the finding carries the exact `git branch -d` command,
+// which itself refuses unmerged branches.
+func (d *Doctor) checkOrphanBranches(ctx context.Context, st *State) []Finding {
+	if d.Git == nil {
+		return nil
+	}
+	inUse := map[string]bool{} // repo + branch
+	repos := map[string]bool{}
+	for _, ws := range st.Workspaces {
+		for _, r := range ws.Repos {
+			repos[r.SourcePath] = true
+			inUse[r.SourcePath+"\x00"+r.Branch] = true
+		}
+	}
+	for _, p := range append(st.KnownRepos, d.KnownRepos...) {
+		repos[p] = true
+	}
+	var f []Finding
+	for repo := range repos {
+		branches, err := d.Git.ListBranches(ctx, repo, "dmux/")
+		if err != nil {
+			continue
+		}
+		var orphans []string
+		for _, b := range branches {
+			if !inUse[repo+"\x00"+b] {
+				orphans = append(orphans, b)
+			}
+		}
+		if len(orphans) == 0 {
+			continue
+		}
+		sort.Strings(orphans)
+		f = append(f, Finding{Check: "branch", Severity: SevInfo, Subject: repo,
+			Message: fmt.Sprintf("%d dmux branch(es) not used by any workspace: %s", len(orphans), strings.Join(orphans, ", ")),
+			Advice:  fmt.Sprintf("if their work is merged or unwanted: git -C %s branch -d %s   (refuses unmerged branches; they may also be the branches you meant to keep)", repo, strings.Join(orphans, " "))})
+	}
+	return f
 }

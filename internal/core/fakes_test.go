@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 )
 
@@ -142,6 +144,17 @@ func (f *fakeGit) StatusPorcelain(_ context.Context, wt string) ([]string, error
 		return nil, err
 	}
 	return f.dirty[wt], nil
+}
+
+func (f *fakeGit) ListBranches(_ context.Context, repo, prefix string) ([]string, error) {
+	var out []string
+	for b := range f.repos[repo] {
+		if strings.HasPrefix(b, prefix) {
+			out = append(out, b)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func (f *fakeGit) CommitsAhead(_ context.Context, wt, _ string) (int, error) {

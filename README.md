@@ -199,7 +199,9 @@ The tool is built around a few rules that hold in code, not just in docs:
   in scripts.
 - Branches are kept by default. `--delete-branches` deletes only branches dmux
   created, only with `git branch -d` (unmerged branches are kept). dmux has no
-  code path that runs `git branch -D`.
+  code path that runs `git branch -D`. Kept branches block re-creating a
+  workspace of the same name; `dmux doctor` lists them with the `git branch -d`
+  command to run, and the `workspace new` error says the same.
 - `resume` continues the *recorded* conversation (`devin -r <id>`). It never
   guesses by directory, so several sessions in one workspace stay distinct.
 - Isolation is **per workspace, not per session**: two sessions in the same

@@ -44,6 +44,8 @@ type Git interface {
 	// StatusPorcelain returns `git status --porcelain` lines for a worktree;
 	// empty means clean.
 	StatusPorcelain(ctx context.Context, worktree string) ([]string, error)
+	// ListBranches returns local branch names in repo starting with prefix.
+	ListBranches(ctx context.Context, repo, prefix string) ([]string, error)
 	// CommitsAhead returns how many commits HEAD of worktree has that are
 	// not reachable from baseRef (`rev-list --count base..HEAD`). An
 	// unresolvable baseRef is an error.
