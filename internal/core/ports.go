@@ -114,6 +114,14 @@ type LaunchSpec struct {
 	Model          string // optional --model value
 }
 
+// ToolCallOutcome is Devin's recorded final state of a tool call, read from
+// its own session store. It resolves permission requests that hooks cannot
+// observe (Spike 3: deny and cancel fire no hook).
+type ToolCallOutcome struct {
+	ToolUseID string
+	Outcome   ApprovalOutcome // approved (ran), denied, canceled
+}
+
 // Devin is the port for the Devin CLI: how to invoke it and how to read
 // what it knows. The adapter isolates the version-specific CLI contract.
 type Devin interface {
@@ -123,6 +131,10 @@ type Devin interface {
 	// interactive Devin session per spec. It never includes a cwd; the
 	// caller sets that.
 	LaunchArgs(spec LaunchSpec) []string
+	// ToolCallOutcomes returns the final outcome of the given tool calls in
+	// a Devin session, for those that have one. Best-effort and read-only:
+	// callers must treat an error as "unknown", never as a failure.
+	ToolCallOutcomes(ctx context.Context, devinSessionID string, toolUseIDs []string) ([]ToolCallOutcome, error)
 }
 
 // Store is the port for persisted State. Read returns an atomic snapshot

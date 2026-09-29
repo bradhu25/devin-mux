@@ -43,6 +43,9 @@ func (f *fakeTmux) Attach(TmuxTarget) error { return errors.New("fake attach") }
 type fakeDevin struct{ available error }
 
 func (f *fakeDevin) Available(context.Context) error { return f.available }
+func (f *fakeDevin) ToolCallOutcomes(context.Context, string, []string) ([]ToolCallOutcome, error) {
+	return nil, nil
+}
 func (f *fakeDevin) LaunchArgs(s LaunchSpec) []string {
 	args := []string{"devin"}
 	if s.ResumeID != "" {

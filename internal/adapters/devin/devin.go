@@ -12,9 +12,12 @@ import (
 	"github.com/bradhu25/devin-mux/internal/core"
 )
 
-// Adapter builds Devin invocations. Zero value uses "devin" on PATH.
+// Adapter builds Devin invocations and reads Devin's session store. Zero
+// value uses "devin" on PATH and the default store path.
 type Adapter struct {
 	Bin string
+	// StorePath overrides the sessions.db location (tests).
+	StorePath string
 }
 
 var _ core.Devin = (*Adapter)(nil)
