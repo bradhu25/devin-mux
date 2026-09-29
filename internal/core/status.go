@@ -38,7 +38,9 @@ type Status struct {
 // (stable), because parallel hook invocations may append out of order.
 //
 // Rules (see PLAN.md "Live status architecture"):
-//   - session_started / prompt_submitted / tool_started => running, working
+//   - session_started         => running, idle (waiting for the first prompt;
+//     clears pending approvals and exit info from a previous run)
+//   - prompt_submitted / tool_started => running, working
 //   - approval_requested(id)  => pending += id => awaiting-approval
 //   - tool_completed(id)      => pending -= id (approved and ran)
 //   - approval_resolved(id)   => pending -= id; denied/canceled => idle
@@ -66,7 +68,10 @@ func Reduce(events []SessionEvent) Status {
 
 		switch ev.Type {
 		case SessionStarted:
-			st.Lifecycle, st.Activity = LifecycleRunning, ActivityWorking
+			// Fresh start or resume: the agent is at its input box until a
+			// prompt arrives. A new start also supersedes the previous run.
+			st.Lifecycle, st.Activity = LifecycleRunning, ActivityIdle
+			st.Pending, st.ExitCode, st.Signal = nil, nil, ""
 
 		case PromptSubmitted:
 			if pid := str(ev.Data, "promptId"); pid != "" && pid != st.CurrentPromptID {

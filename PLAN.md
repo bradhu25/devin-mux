@@ -351,8 +351,10 @@ fire nothing, not even `Stop`). approval_resolved is produced by the
    (outcome unknown → idle). Otherwise remain awaiting-approval, but mark
    evidence as stale after a threshold and display **unknown**.
 
-**Reducer (FSM)**: session_started/prompt_submitted/tool_started → running +
-working; approval_requested → awaiting-approval; turn_completed → idle;
+**Reducer (FSM)**: session_started → running + **idle** (at the input box until
+a prompt arrives; also clears pending/exit info from a previous run — found in
+dogfooding: resume without `-t` showed "working"); prompt_submitted/tool_started
+→ running + working; approval_requested → awaiting-approval; turn_completed → idle;
 session_ended → exited + unknown; process_exited → exited (or failed if
 nonzero) + unknown.
 

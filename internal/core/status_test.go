@@ -27,6 +27,31 @@ func TestReduce_Empty(t *testing.T) {
 	expect(t, Reduce(nil), LifecycleStarting, ActivityUnknown, 0)
 }
 
+// A started session with no prompt yet is waiting at its input box: idle,
+// not working. Applies to a fresh start (spawn without -t) and to a resume
+// without -t after an exit.
+func TestReduce_StartWithoutPromptIsIdle(t *testing.T) {
+	fresh := []SessionEvent{ev(0, SessionStarted, map[string]any{"source": "startup"})}
+	expect(t, Reduce(fresh), LifecycleRunning, ActivityIdle, 0)
+
+	resumed := []SessionEvent{
+		ev(0, SessionStarted, nil),
+		ev(1, PromptSubmitted, map[string]any{"promptId": "p1"}),
+		ev(2, ApprovalRequested, tool("t1")),
+		ev(3, ProcessExited, map[string]any{"exitCode": -1, "signal": "terminated"}), // dmux kill
+		ev(4, SessionStarted, map[string]any{"source": "resume"}),                    // dmux resume, no -t
+	}
+	st := Reduce(resumed)
+	expect(t, st, LifecycleRunning, ActivityIdle, 0)
+	if st.ExitCode != nil {
+		t.Fatal("a new start must clear the previous exit code")
+	}
+
+	// Once a prompt arrives, it is working.
+	withPrompt := append(append([]SessionEvent(nil), resumed...), ev(5, PromptSubmitted, map[string]any{"promptId": "p2"}))
+	expect(t, Reduce(withPrompt), LifecycleRunning, ActivityWorking, 0)
+}
+
 // Spike 3 approve path: Pre -> Permission -> Post -> Stop.
 func TestReduce_ApprovePath(t *testing.T) {
 	evs := []SessionEvent{
