@@ -20,7 +20,7 @@ func newWorkspaceCmd(a *app) *cobra.Command {
 		Aliases: []string{"ws"},
 		Short:   "Create and manage workspaces (sets of git worktrees)",
 	}
-	cmd.AddCommand(newWorkspaceNewCmd(a), newWorkspaceListCmd(a), newWorkspaceStatusCmd(a))
+	cmd.AddCommand(newWorkspaceNewCmd(a), newWorkspaceListCmd(a), newWorkspaceStatusCmd(a), newWorkspaceRmCmd(a))
 	return cmd
 }
 
