@@ -625,6 +625,34 @@ Cross-cutting:
 - [x] git adapter: `GIT_TERMINAL_PROMPT=0`, context timeouts, porcelain
       parsing (`worktree list --porcelain`, `status --porcelain`) (M1)
 
+## v0 validation (2026-09-29)
+
+Functionally complete CLI (M1–M4). Validated before any UI work:
+
+- **Tier 3 smoke harness** (`make smoke`, real Devin + isolated tmux, ~30s,
+  4 cheap sessions, self-cleaning): `TestLifecycle` (workspace new → two
+  concurrent spawns → both idle via hooks with devin ids captured → ls -v
+  last messages → jump ambiguity/attach path → kill → exited → resume with
+  recall of the earlier answer, same conversation → status clean → dirty →
+  rm refusals (--stop, --discard, --yes) → full removal with branch policy
+  → ls empty → doctor quiet); `TestServerRestart` (tmux server killed under
+  a live session → process_exited via SIGHUP → doctor suggests resume →
+  resume recalls answer); `TestConcurrentSpawns` (6 parallel spawns, all
+  recorded, all windows tagged). All pass.
+- Full unit + adapter suite under `-race`, lint clean, cross-compiles for
+  linux/amd64, linux/arm64, darwin/amd64.
+- Edge cases: state root and source paths containing spaces work; tasks
+  with quotes/`$` quoted correctly into tmux; workspace names with spaces
+  rejected up front; moved binary → doctor warns, `init` repoints
+  ("updated") without duplicating entries.
+- Known limitation: a source repo whose *directory name* contains a space
+  is rejected (it would become a workspace subdirectory name). Workaround:
+  rename or symlink the checkout.
+- Interactive paths verified by hand earlier: picker + attach (M2),
+  switch-client inside tmux (M2), approve/deny/cancel status (M3).
+- Still to validate by the user: dogfooding on a real repo with a real task
+  on the default tmux server.
+
 ## Phase 2 — Polish & ship v0.1
 
 ### `dmux ui` is a presentation layer, not a second implementation
