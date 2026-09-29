@@ -16,6 +16,9 @@ type fakeGit struct {
 	repos    map[string]map[string]bool // toplevel -> branches
 	worktree map[string]string          // worktree path -> repo
 	checked  map[string]string          // worktree path -> branch checked out there
+	dirty    map[string][]string        // worktree path -> status lines
+	ahead    map[string]int             // worktree path -> commits ahead of base
+	locked   map[string]bool            // worktree path -> locked
 	calls    []string
 	failOn   map[string]error // "op:arg" -> error
 }
@@ -23,7 +26,7 @@ type fakeGit struct {
 // newFakeGit creates repos whose main checkout has "main" checked out, as
 // real git does.
 func newFakeGit(repos ...string) *fakeGit {
-	f := &fakeGit{repos: map[string]map[string]bool{}, worktree: map[string]string{}, checked: map[string]string{}, failOn: map[string]error{}}
+	f := &fakeGit{repos: map[string]map[string]bool{}, worktree: map[string]string{}, checked: map[string]string{}, dirty: map[string][]string{}, ahead: map[string]int{}, locked: map[string]bool{}, failOn: map[string]error{}}
 	for _, r := range repos {
 		f.repos[r] = map[string]bool{"main": true}
 		f.worktree[r] = r
@@ -118,7 +121,7 @@ func (f *fakeGit) WorktreeList(_ context.Context, repo string) ([]Worktree, erro
 	var out []Worktree
 	for p, r := range f.worktree {
 		if r == repo {
-			out = append(out, Worktree{Path: p, Branch: f.checked[p]})
+			out = append(out, Worktree{Path: p, Branch: f.checked[p], Locked: f.locked[p]})
 		}
 	}
 	return out, nil
@@ -135,7 +138,17 @@ func (f *fakeGit) BranchDeleteSafe(_ context.Context, repo, branch string) error
 }
 
 func (f *fakeGit) StatusPorcelain(_ context.Context, wt string) ([]string, error) {
-	return nil, f.record("status", wt)
+	if err := f.record("status", wt); err != nil {
+		return nil, err
+	}
+	return f.dirty[wt], nil
+}
+
+func (f *fakeGit) CommitsAhead(_ context.Context, wt, _ string) (int, error) {
+	if err := f.record("ahead", wt); err != nil {
+		return 0, err
+	}
+	return f.ahead[wt], nil
 }
 
 func (f *fakeGit) hasCall(key string) bool {

@@ -233,3 +233,30 @@ func TestTimeoutIsEnforced(t *testing.T) {
 		t.Fatal("timeout did not cut the command short")
 	}
 }
+
+func TestCommitsAhead(t *testing.T) {
+	requireGit(t)
+	a := &Adapter{}
+	ctx := context.Background()
+	repo := initRepo(t)
+	base, _ := a.ResolveRef(ctx, repo, "main")
+	wt := filepath.Join(t.TempDir(), "wt")
+	if err := a.WorktreeAdd(ctx, repo, wt, core.WorktreeAddOpts{NewBranch: "feat", BaseRef: base}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := a.CommitsAhead(ctx, wt, base); err != nil || n != 0 {
+		t.Fatalf("fresh branch: %d %v", n, err)
+	}
+	for i := 0; i < 2; i++ {
+		cmd := exec.CommandContext(ctx, "git", "-C", wt, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "c")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+	}
+	if n, err := a.CommitsAhead(ctx, wt, base); err != nil || n != 2 {
+		t.Fatalf("after 2 commits: %d %v", n, err)
+	}
+	if _, err := a.CommitsAhead(ctx, wt, "deadbeef"); err == nil {
+		t.Fatal("unresolvable base must error")
+	}
+}

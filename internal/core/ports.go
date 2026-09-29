@@ -41,6 +41,10 @@ type Git interface {
 	// StatusPorcelain returns `git status --porcelain` lines for a worktree;
 	// empty means clean.
 	StatusPorcelain(ctx context.Context, worktree string) ([]string, error)
+	// CommitsAhead returns how many commits HEAD of worktree has that are
+	// not reachable from baseRef (`rev-list --count base..HEAD`). An
+	// unresolvable baseRef is an error.
+	CommitsAhead(ctx context.Context, worktree, baseRef string) (int, error)
 }
 
 // WorktreeAddOpts controls WorktreeAdd. Exactly one of NewBranch or

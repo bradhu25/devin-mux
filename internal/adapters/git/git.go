@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -163,6 +164,18 @@ func (a *Adapter) WorktreePrune(ctx context.Context, repo string) error {
 func (a *Adapter) BranchDeleteSafe(ctx context.Context, repo, branch string) error {
 	_, err := a.run(ctx, repo, "branch", "-d", branch)
 	return err
+}
+
+func (a *Adapter) CommitsAhead(ctx context.Context, worktree, baseRef string) (int, error) {
+	out, err := a.run(ctx, worktree, "rev-list", "--count", baseRef+"..HEAD")
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("parse rev-list count %q: %w", out, err)
+	}
+	return n, nil
 }
 
 func (a *Adapter) StatusPorcelain(ctx context.Context, worktree string) ([]string, error) {

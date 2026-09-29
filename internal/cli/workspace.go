@@ -20,8 +20,75 @@ func newWorkspaceCmd(a *app) *cobra.Command {
 		Aliases: []string{"ws"},
 		Short:   "Create and manage workspaces (sets of git worktrees)",
 	}
-	cmd.AddCommand(newWorkspaceNewCmd(a), newWorkspaceListCmd(a))
+	cmd.AddCommand(newWorkspaceNewCmd(a), newWorkspaceListCmd(a), newWorkspaceStatusCmd(a))
 	return cmd
+}
+
+func newWorkspaceStatusCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:     "status <workspace>",
+		Aliases: []string{"diff"},
+		Short:   "Show uncommitted changes and unmerged commits in each repo of a workspace",
+		Long: `Inspect every repo worktree in a workspace: uncommitted changes, commits on the
+branch that are not in its base ref, and git worktree locks. Run this before
+"dmux workspace rm" to see what would be lost.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := a.init(); err != nil {
+				return err
+			}
+			st, err := a.workspaces.Inspect(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			return renderWorkspaceStatus(cmd.OutOrStdout(), st)
+		},
+	}
+}
+
+func renderWorkspaceStatus(w io.Writer, st *core.WorkspaceInspection) error {
+	fmt.Fprintf(w, "Workspace %s (%s)  root: %s\n", st.Workspace.Name, st.Workspace.Status, st.Workspace.Root)
+	for _, r := range st.Repos {
+		fmt.Fprintf(w, "\n%s/  branch %s (base %s)\n", r.Repo.Name, r.Repo.Branch, shortRef(r.Repo.BaseRef))
+		switch {
+		case r.Err != nil:
+			fmt.Fprintf(w, "  ! could not inspect: %v\n", r.Err)
+		case r.Missing:
+			fmt.Fprintf(w, "  ! worktree is no longer registered with git (run `dmux doctor`)\n")
+		case r.Clean():
+			fmt.Fprintf(w, "  clean — nothing would be lost\n")
+		default:
+			if r.Locked {
+				fmt.Fprintf(w, "  locked by git worktree lock: %s\n", firstNonEmpty(r.LockReason, "(no reason given)"))
+			}
+			if r.CommitsAhead > 0 {
+				fmt.Fprintf(w, "  %d commit(s) not in base %s\n", r.CommitsAhead, shortRef(r.Repo.BaseRef))
+			}
+			if len(r.Dirty) > 0 {
+				fmt.Fprintf(w, "  %d uncommitted change(s):\n", len(r.Dirty))
+				for i, line := range r.Dirty {
+					if i == 10 {
+						fmt.Fprintf(w, "    … %d more\n", len(r.Dirty)-10)
+						break
+					}
+					fmt.Fprintf(w, "    %s\n", line)
+				}
+			}
+		}
+	}
+	if st.AnyUnsafe() {
+		fmt.Fprintf(w, "\n`dmux workspace rm %s` will refuse without --discard (and never removes locked worktrees).\n", st.Workspace.Name)
+	}
+	return nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func newWorkspaceNewCmd(a *app) *cobra.Command {
