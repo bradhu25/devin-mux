@@ -62,23 +62,37 @@ dmux started; your other Devin sessions are ignored.
 # 1. A workspace: one worktree per repo, on a new branch dmux/<name>
 dmux workspace new feature-x --repo ~/code/api --repo ~/code/web
 
-# 2. Sessions: each runs in its own tmux window, cwd = the workspace root
+# 2. Sessions: each runs in its own tmux window, cwd = the workspace root.
+#    -t is the task: Devin's first prompt, and the session's label from then on.
 dmux spawn feature-x -t "Fix the auth bug in api/ and add a regression test"
 dmux spawn feature-x -t "Update web/ to handle the new error code"
+#    -> Spawned session s_0a7ae6 ...   (ids also appear in `dmux ls`)
 
 # 3. Watch
-dmux ls -w                # refreshes every 2s; Ctrl-C to stop
+dmux ls                   # the board, once
+dmux ls -w                # same, refreshing every 2s until Ctrl-C
 
 # 4. Go there when one needs you
 dmux jump                 # picker (outside tmux: attaches; inside: switches window)
-dmux jump auth            # or match by task text / id prefix
+dmux jump auth            # or name it: task text, session id, or id prefix
 
-# 5. Later
-dmux kill s_0a7ae6
-dmux resume s_0a7ae6 -t "Pick up where you left off and run the tests"
+# 5. Later — every <session> argument accepts task text, id, or id prefix
+dmux kill auth
+dmux resume auth -t "Pick up where you left off and run the tests"
 dmux workspace status feature-x
 dmux workspace rm feature-x --stop --delete-branches
 ```
+
+### Naming sessions
+
+Wherever a command takes a `<session>`, you can pass the session id
+(`s_0a7ae6`), a unique id prefix (`s_0a`), or any part of the task text,
+case-insensitive (`auth`). It must match exactly one session; if it's
+ambiguous, dmux lists the candidates. Ids come from `dmux spawn`'s output and
+the `SESSION` column of `dmux ls`; in practice the task text is what you'll
+type. `-t` is optional on `spawn` — without it Devin opens at an empty prompt —
+but a short task makes the session findable, so give one even if you plan to
+type the real request yourself.
 
 ### Reading `dmux ls`
 
@@ -112,11 +126,11 @@ resumable.
 | `dmux workspace list` | |
 | `dmux workspace status <name>` (alias `diff`) | per repo: uncommitted changes, commits not in the base ref, worktree locks |
 | `dmux workspace rm <name>` | see [Safety](#safety) |
-| `dmux spawn <workspace> -t "task" [--permission-mode m] [--model m]` | new session; warns when others already share the workspace |
-| `dmux ls [-w] [-v]` | status board |
-| `dmux jump [query]` | picker, or match id / id prefix / task text |
+| `dmux spawn <workspace> [-t "task"] [--permission-mode m] [--model m]` | new session; `-t` is Devin's first prompt and the session's label; warns when others already share the workspace |
+| `dmux ls [-w] [-v]` | status board, once; `-w` refreshes every 2s; `-v` adds evidence and last message |
+| `dmux jump [<session>]` | picker when no argument; see [Naming sessions](#naming-sessions) |
 | `dmux kill <session> [--grace 5s]` | SIGTERM → wait → SIGKILL, close window; record kept |
-| `dmux resume <session> [-t "prompt"]` | `devin -r <conversation>` in a new window, from the workspace root |
+| `dmux resume <session> [-t "prompt"]` | `devin -r <conversation>` in a new window, from the workspace root; `-t` is submitted on resume |
 | `dmux doctor [--fix]` | report problems; `--fix` applies only repairs that cannot lose work |
 
 Every command has `--help`.
