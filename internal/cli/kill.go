@@ -22,7 +22,8 @@ conversation can be continued later with "dmux resume <session>". Killing a
 session never deletes files or branches; use "dmux workspace rm" for that.`,
 		Example: `  dmux kill s_0a7ae6
   dmux kill auth        # by task text (must be unambiguous)`,
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessions(a, sessionsLive),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.init(); err != nil {
 				return err

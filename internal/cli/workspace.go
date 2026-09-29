@@ -32,7 +32,8 @@ func newWorkspaceStatusCmd(a *app) *cobra.Command {
 		Long: `Inspect every repo worktree in a workspace: uncommitted changes, commits on the
 branch that are not in its base ref, and git worktree locks. Run this before
 "dmux workspace rm" to see what would be lost.`,
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeWorkspaces(a),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.init(); err != nil {
 				return err

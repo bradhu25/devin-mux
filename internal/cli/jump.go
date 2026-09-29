@@ -22,7 +22,8 @@ workspace. A query matches a session id, id prefix, or task text.`,
 		Example: `  dmux jump
   dmux jump s_0a7a
   dmux jump auth`,
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeSessions(a, sessionsLive),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.init(); err != nil {
 				return err

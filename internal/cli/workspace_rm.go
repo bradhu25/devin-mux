@@ -34,7 +34,8 @@ so you can still "devin -r <id>" them by hand.`,
 		Example: `  dmux workspace status feature-x      # see what would be lost first
   dmux workspace rm feature-x
   dmux workspace rm feature-x --stop --discard --delete-branches`,
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeWorkspaces(a),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.init(); err != nil {
 				return err

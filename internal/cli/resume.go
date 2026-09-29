@@ -25,7 +25,8 @@ dmux always resumes the specific conversation it recorded; it never guesses by
 directory. A session that is still running cannot be resumed — jump to it.`,
 		Example: `  dmux resume s_0a7ae6
   dmux resume auth -t "Pick up where you left off and run the tests"`,
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeSessions(a, sessionsExited),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.init(); err != nil {
 				return err

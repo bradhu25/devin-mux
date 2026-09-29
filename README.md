@@ -139,6 +139,26 @@ resumable.
 
 Every command has `--help`.
 
+### Shell completion
+
+`<TAB>` completes commands, flags, **workspace names** (`spawn`, `workspace
+status|rm`) and **session ids** with their task — live sessions for `jump` and
+`kill`, resumable ones for `resume` — so you never have to remember an id.
+Enable it once for your shell:
+
+```bash
+# bash (macOS ships bash 3.2, where `source <(...)` fails silently — use a file)
+dmux completion bash > ~/.dmux-completion.bash
+echo 'source ~/.dmux-completion.bash' >> ~/.bash_profile
+# zsh
+dmux completion zsh > ~/.dmux-completion.zsh
+echo 'source ~/.dmux-completion.zsh' >> ~/.zshrc
+# fish
+dmux completion fish > ~/.config/fish/completions/dmux.fish
+```
+
+Regenerate the file after upgrading dmux.
+
 ## Safety
 
 The tool is built around a few rules that hold in code, not just in docs:

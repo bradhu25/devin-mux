@@ -25,7 +25,8 @@ Isolation is per workspace, not per session: two sessions in the same workspace
 share its files and branches.`,
 		Example: `  dmux spawn feature-x -t "Fix the authentication bug in api/"
   dmux spawn feature-x --permission-mode accept-edits -t "Add tests for web/"`,
-		Args: cobra.ExactArgs(1),
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeWorkspaces(a),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.init(); err != nil {
 				return err
