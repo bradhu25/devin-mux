@@ -47,14 +47,6 @@ dmux init             # register the status hook in ~/.config/devin/config.json
 dmux doctor           # everything should read "No problems found."
 ```
 
-**PATH.** `go install` puts the binary in `$(go env GOPATH)/bin` (usually
-`~/go/bin`), which is often *not* on your `PATH`. `make install` checks and
-prints the exact line to add for your shell. One macOS gotcha: terminals open
-*login* shells, and login bash reads `~/.bash_profile`, not `~/.bashrc` — a PATH
-line in the wrong file is why a tool can work in one terminal and not another.
-`dmux doctor` also reports when `dmux` on PATH is missing or is a stale copy
-that shadows the build you're running.
-
 **Hooks.** `dmux init` edits Devin's user config: it appends its own hook
 entries, leaves everything else exactly as it was, and writes a timestamped
 backup next to the file. The entries point at the binary's absolute path, so
