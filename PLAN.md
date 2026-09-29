@@ -540,7 +540,7 @@ infrastructure is built ahead of the integration that proves it.
 | --- | --- | --- |
 | **M1 — Workspace creation** (git) — **DONE 2026-09-28** | git adapter, WorkspaceManager (create saga incl. rollback), state store + flock, workspace records, workspace AGENTS.md map | `dmux workspace new feature-x --repo api` → `dmux workspace list` |
 | **M2 — Session execution** (tmux + Devin) — **DONE 2026-09-28** | tmux adapter (ids, tags, switch/attach), `dmux run` wrapper, SessionManager.spawn, session records, jump picker | `dmux spawn feature-x -t "Fix authentication"` → `dmux jump` (both interactive paths verified live) |
-| **M3 — Observability** (hooks) | `dmux hook-event`, normalize, JSONL events, reducer FSM, reconciler, `dmux init` hook install | `dmux ls` — status changes live as the agent works, requests permission, finishes |
+| **M3 — Observability** (hooks) — **DONE 2026-09-29** | `dmux hook-event`, normalize, JSONL events, reducer FSM, reconciler (events + tmux liveness + Devin store), `dmux init` hook install | `dmux ls` — verified live: awaiting-approval → (user denies, no hook fires) → idle via Devin store; hooks-only would have shown awaiting-approval forever |
 | **M4 — Lifecycle completeness** (reliability) | kill, resume, workspace rm saga, branch policy, `diff/status`, `doctor` recovery | kill a session, resume it, remove a dirty workspace safely |
 | **M5 — Product experience** (v0.1) | Bubble Tea `dmux ui`, tests, README, goreleaser, Homebrew tap | = Phase 2 |
 
@@ -601,29 +601,29 @@ Commands:
       work across all repos in a workspace before deleting it
 - [ ] `dmux doctor` — find/repair workspaces stuck mid-saga, dead tmux
       targets, orphaned dirs
-- [ ] `dmux init` — install user-level hook config (idempotent merge into
-      `~/.config/devin/config.json`), create `~/.devin-mux/`, run doctor
+- [x] `dmux init` — install user-level hook config (idempotent merge into
+      `~/.config/devin/config.json`) (M3). Doctor integration → M4
 - [x] `dmux spawn <workspace> [-t "task prompt"]` — new Devin session in tmux (M2)
 - [x] `dmux jump [query]` — picker / id / task query; switch-client inside
       tmux, exec attach outside; tag-validated (M2). Status badges → M3
-- [ ] `dmux ls` — table of all workspaces/sessions with lifecycle + activity
+- [x] `dmux ls [-w] [-v]` — table of all workspaces/sessions with derived status (M3)
 - [ ] `dmux kill <session>` — end a session (tmux + record)
 - [ ] `dmux resume <session>` — relaunch an exited session via `devin -r
       <devinSessionId>` in its workspace
 
 Cross-cutting:
-- [ ] tmux adapter (session-per-workspace, window-per-Devin-session; inside
+- [x] tmux adapter (session-per-workspace, window-per-Devin-session; inside
       tmux → switch-client/select-window, outside → `syscall.Exec` attach;
-      `@dmux_session` window tag set at spawn and verified on jump)
-- [ ] State store: `config.json`/`state.json` split, atomic temp+rename
-      writes, `flock`-guarded `Update()` transaction, O_APPEND single-write
-      JSONL event appender
-- [ ] Status pipeline: `dmux hook-event` (hook writer) + `dmux run` (launch
-      wrapper w/ process_exited) + JSONL event store + reducer + reconciler
-- [ ] Hooks plugin (`hooks.json`) shipping the `dmux hook-event` bindings
+      `@dmux_session` window tag set at spawn and verified on jump) (M2)
+- [x] State store: `state.json` atomic temp+rename writes, `flock`-guarded
+      `Update()` transaction, O_APPEND single-write JSONL event appender (M1).
+      `config.json` deferred until a setting needs it
+- [x] Status pipeline: `dmux hook-event` (hook writer) + `dmux run` (launch
+      wrapper w/ process_exited) + JSONL event store + reducer + reconciler (M2/M3)
+- [ ] Hooks plugin (`hooks.json`) as alternative distribution (deferred; user-level config is primary)
 - [ ] Graceful degradation when tmux/devin missing (doctor reports it)
-- [ ] git adapter: `GIT_TERMINAL_PROMPT=0`, context timeouts, porcelain
-      parsing (`worktree list --porcelain`, `status --porcelain`)
+- [x] git adapter: `GIT_TERMINAL_PROMPT=0`, context timeouts, porcelain
+      parsing (`worktree list --porcelain`, `status --porcelain`) (M1)
 
 ## Phase 2 — Polish & ship v0.1
 
