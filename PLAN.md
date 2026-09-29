@@ -696,8 +696,9 @@ hook payloads, invokes git, or knows tmux topology.
 - [ ] `dmux ui` — full-screen Bubble Tea TUI over `core.Snapshot()`: tree
       of workspaces/sessions, status badges, one-key jump, fsnotify-driven
       updates, dashboard tmux window + return binding
-- [ ] Docs: README with demo GIF, install (Homebrew tap + `go install` +
-      release binaries), quickstart
+- [x] README for v0 dogfooding: install from source, quickstart, status
+      legend, command reference, safety rules, limitations, troubleshooting
+      (2026-09-29). Demo GIF + Homebrew/release binaries → with M5 packaging
 - [ ] Tests: `go test` unit (state, git worktree ops, tmux adapter with fake
       exec) + smoke script
 - [ ] goreleaser: cross-platform binaries (darwin/linux, amd64/arm64), tag
