@@ -380,8 +380,10 @@ Rules:
   produce no events while working. Unknown is honest; false idle is not.
   Implemented (dogfooding 2026-09-29, Ctrl-C mid-turn showed "working"
   forever): the reducer tracks in-flight tool calls; the reconciler turns
-  *working with nothing in flight* into **unknown** after `StaleAfter` (3m)
-  with evidence. A running tool never goes stale.
+  *working with nothing in flight* into **idle?** (probably-idle) after
+  `StaleAfter` = 90s, chosen from measured thinking gaps (n=38: median 6.6s,
+  p95 34s, max 59s). A running tool never goes stale. User feedback: "idle?"
+  is less startling than "unknown", and 3m was too long.
 
 ### Persistence (design constraint)
 

@@ -46,14 +46,17 @@ type Reconciler struct {
 	Devin  Devin // may be nil: approval resolution via Devin's store is skipped
 	Now    func() time.Time
 	// StaleAfter bounds how long a "working" session with no tool in flight
-	// may stay silent before it is reported as unknown. Ctrl-C mid-turn
-	// fires no hook and leaves no store marker, so silence while "thinking"
-	// is ambiguous; a running tool is not. Default 3m.
+	// may stay silent before it is reported as probably idle. Ctrl-C
+	// mid-turn fires no hook and leaves no store marker, so silence while
+	// "thinking" is ambiguous; a running tool is not. Default 90s.
 	StaleAfter time.Duration
 }
 
-// DefaultStaleAfter is the default for Reconciler.StaleAfter.
-const DefaultStaleAfter = 3 * time.Minute
+// DefaultStaleAfter is the default for Reconciler.StaleAfter. Measured over
+// 38 real thinking gaps (tool_completed/prompt_submitted -> next agent event)
+// in dogfooding sessions: median 6.6s, p95 34s, max 59s. 90s covers the
+// observed maximum with 50% headroom.
+const DefaultStaleAfter = 90 * time.Second
 
 // Snapshot reconciles every recorded session. It never writes state.
 func (r *Reconciler) Snapshot(ctx context.Context) (*Snapshot, error) {
@@ -171,8 +174,8 @@ func (r *Reconciler) reconcileSession(ctx context.Context, s Session, ws Workspa
 		// silence while a tool runs is not.
 		if v.Status.Activity == ActivityWorking && len(v.Status.InFlight) == 0 && !v.Status.LastEventAt.IsZero() {
 			if silent := r.now().Sub(v.Status.LastEventAt); silent > r.staleAfter() {
-				v.Status.Activity = ActivityUnknown
-				v.Evidence = append(v.Evidence, fmt.Sprintf("no events for %s with no tool running; the turn may have been interrupted (Ctrl-C) — check the pane", silent.Truncate(time.Second)))
+				v.Status.Activity = ActivityProbablyIdle
+				v.Evidence = append(v.Evidence, fmt.Sprintf("no events for %s and no tool running: the turn was probably interrupted (Ctrl-C); Devin does not report that, so this is inferred", silent.Truncate(time.Second)))
 			}
 		}
 	}
@@ -197,6 +200,8 @@ func Display(st Status, _ Liveness) string {
 		return "idle"
 	case ActivityAwaitingApproval:
 		return "awaiting-approval"
+	case ActivityProbablyIdle:
+		return "idle?"
 	}
 	return "unknown"
 }

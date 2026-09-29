@@ -186,8 +186,8 @@ func TestReconcile_AliveNoEvents(t *testing.T) {
 
 // Ctrl-C mid-turn fires no hook and leaves no store marker. When the agent
 // is "thinking" (no tool in flight) and nothing has happened for StaleAfter,
-// the honest status is unknown, never working. A tool still running keeps
-// working no matter how long it takes.
+// the status becomes "idle?" (probably idle), never a confident working or
+// idle. A tool still running keeps working no matter how long it takes.
 func TestReconcile_StaleThinkingBecomesUnknown(t *testing.T) {
 	thinking := []SessionEvent{
 		ev(0, SessionStarted, nil),
@@ -206,8 +206,8 @@ func TestReconcile_StaleThinkingBecomesUnknown(t *testing.T) {
 
 	r.Now = func() time.Time { return t0.Add(3*time.Second + 10*time.Minute) }
 	v, _ = r.Reconcile(context.Background(), s, ws)
-	if v.Status.Activity != ActivityUnknown || Display(v.Status, v.Liveness) != "unknown" {
-		t.Fatalf("stale thinking should be unknown: %+v", v.Status)
+	if v.Status.Activity != ActivityProbablyIdle || Display(v.Status, v.Liveness) != "idle?" {
+		t.Fatalf("stale thinking should be idle?: %+v", v.Status)
 	}
 	if len(v.Evidence) == 0 || !strings.Contains(v.Evidence[0], "interrupted") {
 		t.Fatalf("evidence should explain: %v", v.Evidence)

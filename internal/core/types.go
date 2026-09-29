@@ -62,7 +62,11 @@ const (
 	ActivityWorking          Activity = "working"
 	ActivityIdle             Activity = "idle"
 	ActivityAwaitingApproval Activity = "awaiting-approval"
-	ActivityUnknown          Activity = "unknown"
+	// ActivityProbablyIdle is reconciler-derived: alive, no tool in flight,
+	// silent past StaleAfter. Almost always a Ctrl-C'd turn, which Devin
+	// does not report; the question mark in its display label is honest.
+	ActivityProbablyIdle Activity = "probably-idle"
+	ActivityUnknown      Activity = "unknown"
 )
 
 // TmuxTarget identifies where a session runs. IDs ($N/@N) are stable for

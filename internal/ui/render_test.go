@@ -49,7 +49,7 @@ func TestRenderSnapshot(t *testing.T) {
 }
 
 func TestBadgeAndAgo(t *testing.T) {
-	for label, glyph := range map[string]string{"working": "●", "awaiting-approval": "!", "idle": "○", "starting": "◌", "exited": "×", "failed": "✗", "unknown": "?"} {
+	for label, glyph := range map[string]string{"working": "●", "awaiting-approval": "!", "idle": "○", "idle?": "◌", "starting": "◌", "exited": "×", "failed": "✗", "unknown": "?"} {
 		if Badge(label) != glyph {
 			t.Errorf("Badge(%s) = %s", label, Badge(label))
 		}

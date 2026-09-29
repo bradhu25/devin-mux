@@ -20,6 +20,8 @@ func Badge(label string) string {
 		return "!"
 	case "idle":
 		return "○"
+	case "idle?":
+		return "◌"
 	case "starting":
 		return "◌"
 	case "exited":

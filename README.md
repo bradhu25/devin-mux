@@ -107,14 +107,16 @@ type the real request yourself.
 | `○ idle` | the agent finished its turn and is waiting for input |
 | `◌ starting` | process launched, no events yet |
 | `× exited` / `✗ failed` | process gone; `dmux resume` continues the conversation |
-| `? unknown` | alive, but dmux can't tell: typically after `Ctrl-C` mid-turn, which Devin reports to nothing. A running tool never goes unknown; only silent "thinking" does, after 3 minutes. Look at the pane |
+| `◌ idle?` | probably idle: alive, no tool running, silent for 90s+. Almost always a `Ctrl-C`'d turn, which Devin reports to nothing, so dmux infers it. A running tool never gets this label |
+| `? unknown` | alive but no events yet, or evidence is contradictory |
 
 `dmux ls -v` adds the agent's last message and the evidence behind each status.
 
 What dmux cannot see: interrupting a turn with `Ctrl-C` and cancelling a
 permission prompt with `Esc` fire no Devin hook. Cancelled/denied *tool calls*
 are recovered from Devin's own store within a second; a cancelled *turn* with
-no tool in flight is only detectable as silence, hence `unknown`.
+no tool in flight is only detectable as silence, hence `idle?` after 90s
+(measured thinking gaps in real sessions max out around a minute).
 
 ### Inside a session
 
